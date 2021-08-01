@@ -389,7 +389,7 @@ public:
         gradientStops = nullptr;
         linearGradient = nullptr;
         radialGradient = nullptr;
-        bitmap = nullptr;
+        tiledImageBitmap = nullptr;
         bitmapBrush = nullptr;
         currentBrush = nullptr;
     }
@@ -419,8 +419,8 @@ public:
                 bp.pixelFormat = owner.pimpl->renderingTarget->GetPixelFormat();
                 bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
-                auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
-                hr = owner.pimpl->renderingTarget->CreateBitmapBrush (bitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
+                auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
+                hr = owner.pimpl->renderingTarget->CreateBitmapBrush (tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
 
                 currentBrush = bitmapBrush;
             }
@@ -484,7 +484,7 @@ public:
     bool clipsRect = false, shouldClipRect = false;
 
     Image image;
-    ComSmartPtr<ID2D1Bitmap> bitmap; // xxx needs a better name - what is this for??
+    ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
     bool clipsBitmap = false, shouldClipBitmap = false;
 
     ComSmartPtr<ID2D1Geometry> complexClipGeometry;
@@ -640,12 +640,12 @@ void Direct2DLowLevelGraphicsContext::restoreState()
 
 void Direct2DLowLevelGraphicsContext::beginTransparencyLayer (float /*opacity*/)
 {
-    jassertfalse; //xxx todo
+    //jassertfalse; //xxx todo
 }
 
 void Direct2DLowLevelGraphicsContext::endTransparencyLayer()
 {
-    jassertfalse; //xxx todo
+    //jassertfalse; //xxx todo
 }
 
 void Direct2DLowLevelGraphicsContext::setFill (const FillType& fillType)
