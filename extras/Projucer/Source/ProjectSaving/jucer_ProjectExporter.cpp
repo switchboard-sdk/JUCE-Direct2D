@@ -332,11 +332,29 @@ void ProjectExporter::createIconProperties (PropertyListBuilder& props)
     choices.add ("<None>");
     ids.add (var());
 
+#if 0
     for (int i = 0; i < images.size(); ++i)
     {
         choices.add (images.getUnchecked(i)->getName());
         ids.add (images.getUnchecked(i)->getID());
     }
+#else
+
+    for (const auto* imageItem : images)
+    {
+        choices.add(imageItem->getName());
+        ids.add(imageItem->getID());
+    }
+
+    const auto resetToDefaultIfFileMissing = [&ids](ValueWithDefault& v)
+    {
+        if (!v.isUsingDefault() && !ids.contains(v.get()))
+            v.resetToDefault();
+    };
+
+    resetToDefaultIfFileMissing(smallIconValue);
+    resetToDefaultIfFileMissing(bigIconValue);
+#endif
 
     props.add (new ChoicePropertyComponent (smallIconValue, "Icon (Small)", choices, ids),
                "Sets an icon to use for the executable.");
