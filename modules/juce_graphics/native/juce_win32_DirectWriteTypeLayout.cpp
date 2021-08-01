@@ -212,15 +212,16 @@ namespace DirectWriteTypeLayout
 
     void setTextFormatProperties (const AttributedString& text, IDWriteTextFormat& format)
     {
-        DWRITE_TEXT_ALIGNMENT alignment = DWRITE_TEXT_ALIGNMENT_LEADING;
+        DWRITE_TEXT_ALIGNMENT horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_LEADING;
+        DWRITE_PARAGRAPH_ALIGNMENT verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
         DWRITE_WORD_WRAPPING wrapType = DWRITE_WORD_WRAPPING_WRAP;
 
         switch (text.getJustification().getOnlyHorizontalFlags())
         {
             case 0:
             case Justification::left:                   break;
-            case Justification::right:                  alignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
-            case Justification::horizontallyCentred:    alignment = DWRITE_TEXT_ALIGNMENT_CENTER; break;
+            case Justification::right:                  horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
+            case Justification::horizontallyCentred:    horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_CENTER; break;
             case Justification::horizontallyJustified:  break; // DirectWrite cannot justify text, default to left alignment
             default:                                    jassertfalse; break; // Illegal justification flags
         }
@@ -233,6 +234,15 @@ namespace DirectWriteTypeLayout
             default:                          jassertfalse; break; // Illegal flags!
         }
 
+        switch (text.getJustification().getOnlyVerticalFlags())
+        {
+        case 0:
+        case Justification::top:               break;
+        case Justification::verticallyCentred: verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_CENTER; break;
+        case Justification::bottom:            verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_FAR; break;
+        default:                               jassertfalse; break; // Illegal justification flags=
+        }
+
         // DirectWrite does not automatically set reading direction
         // This must be set correctly and manually when using RTL Scripts (Hebrew, Arabic)
         if (text.getReadingDirection() == AttributedString::rightToLeft)
@@ -242,14 +252,15 @@ namespace DirectWriteTypeLayout
             switch (text.getJustification().getOnlyHorizontalFlags())
             {
                 case 0:
-                case Justification::left:      alignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
-                case Justification::right:     alignment = DWRITE_TEXT_ALIGNMENT_LEADING;  break;
+                case Justification::left:      horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
+                case Justification::right:     horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_LEADING;  break;
                 default: break;
             }
         }
 
-        format.SetTextAlignment (alignment);
+        format.SetTextAlignment (horizontalTextAlignment);
         format.SetWordWrapping (wrapType);
+        format.SetParagraphAlignment (verticalParagraphAlignment);
     }
 
     void addAttributedRange (const AttributedString::Attribute& attr, IDWriteTextLayout& textLayout,
