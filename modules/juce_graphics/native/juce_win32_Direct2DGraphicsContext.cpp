@@ -182,6 +182,7 @@ public:
         clearImageClip();
         complexClipLayer = nullptr;
         bitmapMaskLayer = nullptr;
+        endTransparency();
     }
 
     void clearClip()
@@ -470,6 +471,31 @@ public:
         }
     }
 
+    void beginTransparency(float opacity)
+    {
+        auto hr = owner.pimpl->renderingTarget->CreateLayer(nullptr, transparencyLayer.resetAndGetPointerAddress());
+        if (SUCCEEDED(hr))
+        {
+            owner.pimpl->renderingTarget->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(),
+                nullptr,
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                D2D1::IdentityMatrix(),
+                opacity,
+                nullptr,
+                D2D1_LAYER_OPTIONS_NONE),
+                transparencyLayer);
+        }
+    }
+
+    void endTransparency()
+    {
+        if (transparencyLayer)
+        {
+            owner.pimpl->renderingTarget->PopLayer();
+            transparencyLayer = nullptr;
+        }
+    }
+
     Direct2DLowLevelGraphicsContext& owner;
 
     AffineTransform transform;
@@ -510,6 +536,8 @@ public:
     ComSmartPtr<ID2D1GradientStopCollection> gradientStops;
 
     FillType fillType;
+
+    ComSmartPtr<ID2D1Layer> transparencyLayer;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SavedState)
 };
@@ -638,14 +666,14 @@ void Direct2DLowLevelGraphicsContext::restoreState()
     currentState = states.getLast();
 }
 
-void Direct2DLowLevelGraphicsContext::beginTransparencyLayer (float /*opacity*/)
+void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
 {
-    //jassertfalse; //xxx todo
+    currentState->beginTransparency(opacity);
 }
 
 void Direct2DLowLevelGraphicsContext::endTransparencyLayer()
 {
-    //jassertfalse; //xxx todo
+    currentState->endTransparency();
 }
 
 void Direct2DLowLevelGraphicsContext::setFill (const FillType& fillType)
