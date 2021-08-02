@@ -427,9 +427,7 @@ public:
             }
             else if (fillType.isGradient())
             {
-                gradientStops = nullptr;
-
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform.followedBy (transform)) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform) };
 
                 const int numColors = fillType.gradient->getNumColours();
 
@@ -445,8 +443,6 @@ public:
 
                 if (fillType.gradient->isRadial)
                 {
-                    radialGradient = nullptr;
-
                     const auto p1 = fillType.gradient->point1;
                     const auto p2 = fillType.gradient->point2;
                     const auto r = p1.getDistanceFrom(p2);
@@ -457,8 +453,6 @@ public:
                 }
                 else
                 {
-                    linearGradient = 0;
-
                     const auto p1 = fillType.gradient->point1;
                     const auto p2 = fillType.gradient->point2;
                     const auto props = D2D1::LinearGradientBrushProperties ({ p1.x, p1.y }, { p2.x, p2.y });
