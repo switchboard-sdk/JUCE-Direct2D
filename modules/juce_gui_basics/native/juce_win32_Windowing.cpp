@@ -1601,7 +1601,15 @@ public:
             }
 
             if (deletionChecker != nullptr)
+            {
+
+#if JUCE_DIRECT2D
+                if (direct2DContext != nullptr)
+                    direct2DContext->resized();
+#endif
+
                 handleMovedOrResized();
+            }
 
             if (constrainer != nullptr)
                 constrainer->resizeEnd();
@@ -3314,6 +3322,11 @@ private:
             if (! isValidPeer (this))
                 return true;
         }
+
+#if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
+            direct2DContext->resized();
+#endif
 
         handleMovedOrResized();
 
