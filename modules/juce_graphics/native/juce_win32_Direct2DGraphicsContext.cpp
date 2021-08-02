@@ -623,7 +623,7 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
-    currentState->clipToPath (pimpl->pathToPathGeometry (path, transform));
+    currentState->clipToPath (pimpl->pathToPathGeometry (path, currentState->transform.followedBy(transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
