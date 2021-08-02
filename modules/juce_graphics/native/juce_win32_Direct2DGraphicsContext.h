@@ -78,7 +78,6 @@ public:
     bool drawTextLayout (const AttributedString&, const Rectangle<float>&) override;
 
     void resized();
-    //void clear();
 
     void start();
     void end();
