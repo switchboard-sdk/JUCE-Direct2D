@@ -109,7 +109,7 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion)
+    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform)
     {
         ID2D1PathGeometry* p = nullptr;
         factories->d2dFactory->CreatePathGeometry (&p);
@@ -119,7 +119,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         sink->SetFillMode (D2D1_FILL_MODE_WINDING);
 
         for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-            rectToGeometrySink (clipRegion.getRectangle(i), sink, AffineTransform());
+            rectToGeometrySink (clipRegion.getRectangle(i), sink, transform);
 
         hr = sink->Close();
         return p;
@@ -612,7 +612,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipToRectList (pimpl->rectListToPathGeometry (clipRegion));
+    currentState->clipToRectList (pimpl->rectListToPathGeometry (clipRegion, currentState->transform));
     return ! isClipEmpty();
 }
 
