@@ -570,10 +570,10 @@ void Direct2DLowLevelGraphicsContext::resized()
     bounds.setSize (size.width, size.height);
 }
 
-void Direct2DLowLevelGraphicsContext::clear()
-{
-    pimpl->renderingTarget->Clear (D2D1::ColorF (D2D1::ColorF::White, 0.0f)); // xxx why white and not black?
-}
+// void Direct2DLowLevelGraphicsContext::clear()
+// {
+//     pimpl->renderingTarget->Clear (D2D1::ColorF (D2D1::ColorF::White, 0.0f)); // xxx why white and not black?
+// }
 
 void Direct2DLowLevelGraphicsContext::start()
 {
