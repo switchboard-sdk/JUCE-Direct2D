@@ -623,7 +623,7 @@ void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const Affine
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
-    currentState->clipToImage (sourceImage, transform);
+    currentState->clipToImage (sourceImage, currentState->transform.followedBy(transform));
 }
 
 bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>& r)
