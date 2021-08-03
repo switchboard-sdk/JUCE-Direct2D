@@ -182,8 +182,10 @@ public:
         clearFill();
         clearPathClip();
         clearImageClip();
+        clearExcludedRegionsClip();
         complexClipLayer = nullptr;
-        bitmapMaskLayer = nullptr;
+        imageClip.layer = nullptr;
+        excludedRegionsClip.layer = nullptr;
         endTransparency();
     }
 
@@ -254,49 +256,59 @@ public:
     {
         popClips();
 
-        if (shouldClipBitmap)
-        {
-            maskBitmap = nullptr;
-            bitmapMaskBrush = nullptr;
-            shouldClipBitmap = false;
-        }
+        imageClip.clear();
     }
 
     void clipToImage (const Image& clipImage, const AffineTransform& clipTransform)
     {
         clearImageClip();
 
-        if (bitmapMaskLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (bitmapMaskLayer.resetAndGetPointerAddress());
+        auto maskImage = clipImage.convertedToFormat(Image::ARGB);
+        imageClip.create(owner.pimpl->renderingTarget, maskImage, D2D1_SIZE_U{ (UINT32)clipImage.getWidth(), (UINT32)clipImage.getHeight() }, transformToMatrix(clipTransform));
 
-        D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix (clipTransform) };
-        auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
-        D2D1_SIZE_U size = { (UINT32) clipImage.getWidth(), (UINT32) clipImage.getHeight() };
-        auto bp = D2D1::BitmapProperties();
+        pushClips();
+    }
 
-        maskImage = clipImage.convertedToFormat (Image::ARGB);
-        Image::BitmapData bd (maskImage, Image::BitmapData::readOnly); // xxx should be maskImage?
-        bp.pixelFormat = owner.pimpl->renderingTarget->GetPixelFormat();
-        bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    void clearExcludedRegionsClip()
+    {
+        popClips();
 
-        auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, maskBitmap.resetAndGetPointerAddress());
-        hr = owner.pimpl->renderingTarget->CreateBitmapBrush (maskBitmap, bmProps, brushProps, bitmapMaskBrush.resetAndGetPointerAddress());
+        excludedRegionsClip.clear();
+    }
 
-        imageMaskLayerParams = D2D1::LayerParameters();
-        imageMaskLayerParams.opacityBrush = bitmapMaskBrush;
+    void excludeClipRectangle(const Rectangle<int>& r)
+    {
+        clearExcludedRegionsClip();
 
-        shouldClipBitmap = true;
+        //
+        // Make an image the size of the entire render target and fill it with alpha = 1.0
+        //
+        auto size = owner.pimpl->renderingTarget->GetPixelSize();
+        if (excludedRegionsMaskImage.getWidth() != (int)size.width || excludedRegionsMaskImage.getHeight() != (int)size.height)
+        {
+            excludedRegionsMaskImage = Image{ Image::ARGB, (int)size.width, (int)size.height, false };
+            excludedRegionsMaskImage.clear({ excludedRegionsMaskImage.getWidth(), excludedRegionsMaskImage.getHeight() }, Colours::black);
+        }
+
+        //
+        // Fill the excluded region with alpha = 0.0. There may already be other excluded regions with zero alpha in excludedRegionsMaskImage, which is fine.
+        //
+        excludedRegionsMaskImage.clear(r.transformedBy(transform), Colours::transparentBlack);
+
+        //
+        // Create the bitmap & layer for excludedMaskImage
+        //
+        excludedRegionsClip.create(owner.pimpl->renderingTarget, excludedRegionsMaskImage, size, D2D1::IdentityMatrix());
+
         pushClips();
     }
 
     void popClips()
     {
-        if (clipsBitmap)
-        {
-            owner.pimpl->renderingTarget->PopLayer();
-            clipsBitmap = false;
-        }
-
+        excludedRegionsClip.popIfClipped(owner.pimpl->renderingTarget);
+        
+        imageClip.popIfClipped(owner.pimpl->renderingTarget);
+        
         if (clipsComplex)
         {
             owner.pimpl->renderingTarget->PopLayer();
@@ -342,11 +354,9 @@ public:
             clipsComplex = true;
         }
 
-        if (shouldClipBitmap && !clipsBitmap)
-        {
-            owner.pimpl->renderingTarget->PushLayer (imageMaskLayerParams, bitmapMaskLayer);
-            clipsBitmap = true;
-        }
+        imageClip.pushIfNeeded(owner.pimpl->renderingTarget);
+
+        excludedRegionsClip.pushIfNeeded(owner.pimpl->renderingTarget);
     }
 
     void setFill (const FillType& newFillType)
@@ -512,7 +522,6 @@ public:
 
     Image image;
     ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
-    bool clipsBitmap = false, shouldClipBitmap = false;
 
     ComSmartPtr<ID2D1Geometry> complexClipGeometry;
     D2D1_LAYER_PARAMETERS complexClipLayerParams;
@@ -523,12 +532,64 @@ public:
     D2D1_LAYER_PARAMETERS rectListLayerParams;
     ComSmartPtr<ID2D1Layer> rectListLayer;
     bool clipsRectList = false, shouldClipRectList = false;
+    
+    struct
+    {
+        D2D1_LAYER_PARAMETERS layerParams;
+        ComSmartPtr<ID2D1Layer> layer;
+        ComSmartPtr<ID2D1Bitmap> bitmap;
+        ComSmartPtr<ID2D1BitmapBrush> brush;
+        bool isClipped = false, shouldClip = false;
+        
+        void clear()
+        {
+            bitmap = nullptr;
+            brush = nullptr;
+            shouldClip = false;
+        }
 
-    Image maskImage;
-    D2D1_LAYER_PARAMETERS imageMaskLayerParams;
-    ComSmartPtr<ID2D1Layer> bitmapMaskLayer;
-    ComSmartPtr<ID2D1Bitmap> maskBitmap;
-    ComSmartPtr<ID2D1BitmapBrush> bitmapMaskBrush;
+        void create(ID2D1HwndRenderTarget* renderingTarget, Image const& image, D2D1_SIZE_U size, D2D1_MATRIX_3X2_F matrix)
+        {
+            if (layer == nullptr)
+                renderingTarget->CreateLayer(layer.resetAndGetPointerAddress());
+
+            D2D1_BRUSH_PROPERTIES brushProps = { 1, matrix };
+            auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
+            auto bp = D2D1::BitmapProperties();
+
+            Image::BitmapData bd(image, Image::BitmapData::readOnly); // xxx should be maskImage?
+            bp.pixelFormat = renderingTarget->GetPixelFormat();
+            bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+
+            auto hr = renderingTarget->CreateBitmap(size, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
+            hr = renderingTarget->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
+
+            layerParams = D2D1::LayerParameters();
+            layerParams.opacityBrush = brush;
+
+            shouldClip = true;
+        }
+
+        void popIfClipped(ID2D1HwndRenderTarget* renderingTarget)
+        {
+            if (isClipped)
+            {
+                renderingTarget->PopLayer();
+                isClipped = false;
+            }
+        }
+
+        void pushIfNeeded(ID2D1HwndRenderTarget* renderingTarget)
+        {
+            if (shouldClip && !isClipped)
+            {
+                renderingTarget->PushLayer(layerParams, layer);
+                isClipped = true;
+            }
+        }
+
+    } imageClip, excludedRegionsClip;
+    Image excludedRegionsMaskImage;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
@@ -618,9 +679,9 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<i
     return ! isClipEmpty();
 }
 
-void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>&)
+void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>& r)
 {
-    //xxx
+    currentState->excludeClipRectangle(r);
 }
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
