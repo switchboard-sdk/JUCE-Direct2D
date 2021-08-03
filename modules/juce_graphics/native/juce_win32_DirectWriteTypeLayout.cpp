@@ -213,7 +213,6 @@ namespace DirectWriteTypeLayout
     void setTextFormatProperties (const AttributedString& text, IDWriteTextFormat& format)
     {
         DWRITE_TEXT_ALIGNMENT horizontalTextAlignment = DWRITE_TEXT_ALIGNMENT_LEADING;
-        DWRITE_PARAGRAPH_ALIGNMENT verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
         DWRITE_WORD_WRAPPING wrapType = DWRITE_WORD_WRAPPING_WRAP;
 
         switch (text.getJustification().getOnlyHorizontalFlags())
@@ -234,15 +233,6 @@ namespace DirectWriteTypeLayout
             default:                          jassertfalse; break; // Illegal flags!
         }
 
-        switch (text.getJustification().getOnlyVerticalFlags())
-        {
-        case 0:
-        case Justification::top:               break;
-        case Justification::verticallyCentred: verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_CENTER; break;
-        case Justification::bottom:            verticalParagraphAlignment = DWRITE_PARAGRAPH_ALIGNMENT_FAR; break;
-        default:                               jassertfalse; break; // Illegal justification flags=
-        }
-
         // DirectWrite does not automatically set reading direction
         // This must be set correctly and manually when using RTL Scripts (Hebrew, Arabic)
         if (text.getReadingDirection() == AttributedString::rightToLeft)
@@ -260,7 +250,6 @@ namespace DirectWriteTypeLayout
 
         format.SetTextAlignment (horizontalTextAlignment);
         format.SetWordWrapping (wrapType);
-        format.SetParagraphAlignment (verticalParagraphAlignment);
     }
 
     void addAttributedRange (const AttributedString::Attribute& attr, IDWriteTextLayout& textLayout,
@@ -424,7 +413,27 @@ namespace DirectWriteTypeLayout
             renderTarget.CreateSolidColorBrush (D2D1::ColorF (0.0f, 0.0f, 0.0f, 1.0f),
                                                 d2dBrush.resetAndGetPointerAddress());
 
-            renderTarget.DrawTextLayout (D2D1::Point2F ((float) area.getX(), (float) area.getY()),
+            auto y = (float)area.getY();
+            switch (text.getJustification().getOnlyVerticalFlags())
+            {
+            case Justification::verticallyCentred:
+            {
+                DWRITE_TEXT_METRICS metrics;
+                dwTextLayout->GetMetrics(&metrics);
+                y += ((float)area.getHeight() - metrics.height) * 0.5f;
+                break;
+            }
+
+            case Justification::bottom:
+            {
+                DWRITE_TEXT_METRICS metrics;
+                dwTextLayout->GetMetrics(&metrics);
+                y += (float)area.getHeight() - metrics.height;
+                break;
+            }
+            }
+
+            renderTarget.DrawTextLayout (D2D1::Point2F ((float) area.getX(), y),
                                          dwTextLayout, d2dBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
     }
