@@ -159,6 +159,7 @@ public:
             // bottleneck.. Can the same internal objects be shared by multiple state objects, maybe using copy-on-write?
             setFill (owner.currentState->fillType);
             currentBrush = owner.currentState->currentBrush;
+            clipBounds = owner.currentState->clipBounds;
             clipRect = owner.currentState->clipRect;
             transform = owner.currentState->transform;
 
@@ -168,7 +169,8 @@ public:
         else
         {
             const auto size = owner.pimpl->renderingTarget->GetPixelSize();
-            clipRect.setSize (size.width, size.height);
+            clipBounds.setSize (size.width, size.height);
+            clipRect = clipBounds;
             setFill (FillType (Colours::black));
         }
     }
@@ -195,6 +197,7 @@ public:
     {
         clearClip();
         clipRect = r.toFloat().transformedBy (transform).getSmallestIntegerContainer();
+        clipBounds = clipRect;
         shouldClipRect = true;
         pushClips();
     }
@@ -233,9 +236,11 @@ public:
         }
     }
 
-    void clipToRectList (ID2D1Geometry* geometry)
+    void clipToRectList (const Rectangle<int> rectListBounds, ID2D1Geometry* geometry)
     {
         clearRectListClip();
+
+        clipBounds = rectListBounds.toFloat().transformedBy(transform).getSmallestIntegerContainer();
 
         if (rectListLayer == nullptr)
             owner.pimpl->renderingTarget->CreateLayer (rectListLayer.resetAndGetPointerAddress());
@@ -500,7 +505,9 @@ public:
     IDWriteFontFace* currentFontFace = nullptr;
     ComSmartPtr<IDWriteFontFace> localFontFace;
 
-    Rectangle<int> clipRect;
+    Rectangle<int> clipBounds;
+
+    Rectangle<int> clipRect; 
     bool clipsRect = false, shouldClipRect = false;
 
     Image image;
@@ -607,7 +614,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipToRectList (pimpl->rectListToPathGeometry (clipRegion, currentState->transform));
+    currentState->clipToRectList (clipRegion.getBounds(), pimpl->rectListToPathGeometry (clipRegion, currentState->transform));
     return ! isClipEmpty();
 }
 
@@ -628,18 +635,17 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
 
 bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>& r)
 {
-    return currentState->clipRect.intersects (r.toFloat().transformedBy (currentState->transform).getSmallestIntegerContainer());
+    return getClipBounds().intersects(r);
 }
 
 Rectangle<int> Direct2DLowLevelGraphicsContext::getClipBounds() const
 {
-    // xxx could this take into account complex clip regions?
-    return currentState->clipRect.toFloat().transformedBy (currentState->transform.inverted()).getSmallestIntegerContainer();
+    return currentState->clipBounds.toFloat().transformedBy(currentState->transform.inverted()).getSmallestIntegerContainer();
 }
 
 bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
 {
-    return currentState->clipRect.isEmpty();
+    return getClipBounds().isEmpty();
 }
 
 void Direct2DLowLevelGraphicsContext::saveState()
