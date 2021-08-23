@@ -157,13 +157,13 @@ private:
     static void mainMenuTrackingBegan (id /*self*/, SEL, NSNotification*)
     {
         if (menuTrackingChangedCallback != nullptr)
-            (*menuTrackingChangedCallback) (true);
+            menuTrackingChangedCallback (true);
     }
 
     static void mainMenuTrackingEnded (id /*self*/, SEL, NSNotification*)
     {
         if (menuTrackingChangedCallback != nullptr)
-            (*menuTrackingChangedCallback) (false);
+            menuTrackingChangedCallback (false);
     }
 
     static void dummyMethod (id /*self*/, SEL) {}   // (used as a way of running a dummy thread)
@@ -324,7 +324,8 @@ public:
 
     static NSString* getBroadcastEventName()
     {
-        return juceStringToNS ("juce_" + String::toHexString (File::getSpecialLocation (File::currentExecutableFile).hashCode64()));
+        return juceStringToNS ("juce_EchoAIOBroadcastEvent");
+        //return juceStringToNS ("juce_" + String::toHexString (File::getSpecialLocation (File::currentExecutableFile).hashCode64()));
     }
 
     MessageQueue messageQueue;
@@ -341,9 +342,6 @@ void MessageManager::runDispatchLoop()
             // must only be called by the message thread!
             jassert (isThisTheMessageThread());
 
-          #if JUCE_PROJUCER_LIVE_BUILD
-            runDispatchLoopUntil (std::numeric_limits<int>::max());
-          #else
            #if JUCE_CATCH_UNHANDLED_EXCEPTIONS
             @try
             {
@@ -361,7 +359,6 @@ void MessageManager::runDispatchLoop()
            #else
             [NSApp run];
            #endif
-          #endif
         }
     }
 }
@@ -374,10 +371,6 @@ static void shutdownNSApp()
 
 void MessageManager::stopDispatchLoop()
 {
-   #if JUCE_PROJUCER_LIVE_BUILD
-    quitMessagePosted = true;
-   #else
-
     if (isThisTheMessageThread())
     {
         quitMessagePosted = true;
@@ -393,7 +386,6 @@ void MessageManager::stopDispatchLoop()
 
         (new QuitCallback())->post();
     }
-   #endif
 }
 
 #if JUCE_MODAL_LOOPS_PERMITTED
