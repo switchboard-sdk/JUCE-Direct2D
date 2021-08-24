@@ -70,6 +70,10 @@ namespace
     inline Point<float> convertPoint (D2D1_POINT_2F p) noexcept   { return Point<float> ((float) p.x, (float) p.y); }
 }
 
+#if JUCE_DIRECT2D
+#include "juce_win32_DirectWriteCustomFontCollection.cpp"
+#endif
+
 class Direct2DFactories
 {
 public:
@@ -103,7 +107,14 @@ public:
                                      (IUnknown**) directWriteFactory.resetAndGetPointerAddress());
 
                 if (directWriteFactory != nullptr)
-                    directWriteFactory->GetSystemFontCollection (systemFonts.resetAndGetPointerAddress());
+                {
+                    directWriteFactory->GetSystemFontCollection(systemFonts.resetAndGetPointerAddress());
+
+#if JUCE_DIRECT2D
+                    directWriteFactory->RegisterFontFileLoader(customFontCollectionLoader.getFontFileLoader());
+                    directWriteFactory->RegisterFontCollectionLoader(&customFontCollectionLoader);
+#endif
+                }
             }
 
             if (d2dFactory != nullptr)
@@ -124,19 +135,50 @@ public:
 
     ~Direct2DFactories()
     {
+#if JUCE_DIRECT2D
+        if (directWriteFactory != nullptr)
+        {
+            directWriteFactory->UnregisterFontCollectionLoader(&customFontCollectionLoader);
+            directWriteFactory->UnregisterFontFileLoader(customFontCollectionLoader.getFontFileLoader());
+        }
+        customFontCollection = nullptr;
+#endif
         d2dFactory = nullptr;  // (need to make sure these are released before deleting the DynamicLibrary objects)
         directWriteFactory = nullptr;
         systemFonts = nullptr;
         directWriteRenderTarget = nullptr;
     }
 
+#if JUCE_DIRECT2D
+    void addCustomRawFontData(const void* data, size_t dataSize)
+    {
+        customFontCollectionLoader.addCustomRawFontData(data, dataSize);
+
+        if (customFontCollection == nullptr && directWriteFactory != nullptr)
+        {
+            directWriteFactory->CreateCustomFontCollection(&customFontCollectionLoader,
+                &customFontCollectionKey,
+                sizeof(customFontCollectionKey),
+                customFontCollection.resetAndGetPointerAddress());
+        }
+    }
+#endif
+
     ComSmartPtr<ID2D1Factory> d2dFactory;
     ComSmartPtr<IDWriteFactory> directWriteFactory;
     ComSmartPtr<IDWriteFontCollection> systemFonts;
+#if JUCE_DIRECT2D
+    DirectWriteCustomFontCollectionLoader customFontCollectionLoader;
+    ComSmartPtr<IDWriteFontCollection> customFontCollection;
+#endif
     ComSmartPtr<ID2D1DCRenderTarget> directWriteRenderTarget;
 
 private:
     DynamicLibrary direct2dDll, directWriteDll;
+
+#if JUCE_DIRECT2D
+    static constexpr char customFontCollectionKey[] = "JUCEDirect2DFactories";
+#endif
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DFactories)
 };
@@ -145,13 +187,13 @@ private:
 class WindowsDirectWriteTypeface  : public Typeface
 {
 public:
-    WindowsDirectWriteTypeface (const Font& font, IDWriteFontCollection* fontCollection)
-        : Typeface (font.getTypefaceName(), font.getTypefaceStyle())
+    WindowsDirectWriteTypeface (const String& typefaceName, const String& typefaceStyle, IDWriteFontCollection* fontCollection)
+        : Typeface (typefaceName, typefaceStyle)
     {
         jassert (fontCollection != nullptr);
 
         uint32 fontIndex = 0;
-        auto hr = fontCollection->FindFamilyName (font.getTypefaceName().toWideCharPointer(), &fontIndex, &fontFound);
+        auto hr = fontCollection->FindFamilyName (typefaceName.toWideCharPointer(), &fontIndex, &fontFound);
 
         if (! fontFound)
             fontIndex = 0;
@@ -175,7 +217,7 @@ public:
                 ComSmartPtr<IDWriteLocalizedStrings> faceNames;
                 hr = dwFont->GetFaceNames (faceNames.resetAndGetPointerAddress());
 
-                if (font.getTypefaceStyle() == getLocalisedName (faceNames))
+                if (typefaceStyle == getLocalisedName (faceNames))
                     break;
             }
 
@@ -207,6 +249,11 @@ public:
             auto pathScale   = 1.0f / (std::abs (pathAscent) + std::abs (pathDescent));
             pathTransform = AffineTransform::scale (pathScale);
         }
+    }
+
+    WindowsDirectWriteTypeface(const Font& font, IDWriteFontCollection* fontCollection)
+        : WindowsDirectWriteTypeface(font.getTypefaceName(), font.getTypefaceStyle(), fontCollection)
+    {
     }
 
     bool loadedOk() const noexcept          { return dwFontFace != nullptr; }

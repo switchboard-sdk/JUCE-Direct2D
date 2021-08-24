@@ -622,6 +622,19 @@ Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
 
 Typeface::Ptr Typeface::createSystemTypefaceFor (const void* data, size_t dataSize)
 {
+#if JUCE_DIRECT2D
+     SharedResourcePointer<Direct2DFactories> factories;
+     factories->addCustomRawFontData(data, dataSize);
+     if (factories->customFontCollection != nullptr)
+     {
+         WindowsTypeface windowsTypeface(data, dataSize);
+
+         auto wtf = std::make_unique<WindowsDirectWriteTypeface>(windowsTypeface.getName(), windowsTypeface.getStyle(), factories->customFontCollection);
+         if (wtf->loadedOk() && wtf->isFontFound())
+             return wtf.release();
+     }
+#endif
+
     return new WindowsTypeface (data, dataSize);
 }
 
