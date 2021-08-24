@@ -70,10 +70,6 @@ namespace
     inline Point<float> convertPoint (D2D1_POINT_2F p) noexcept   { return Point<float> ((float) p.x, (float) p.y); }
 }
 
-#if JUCE_DIRECT2D
-#include "juce_win32_DirectWriteCustomFontCollection.cpp"
-#endif
-
 class Direct2DFactories
 {
 public:
@@ -150,17 +146,32 @@ public:
     }
 
 #if JUCE_DIRECT2D
-    void addCustomRawFontData(const void* data, size_t dataSize)
+    IDWriteFontFamily* getFontFamilyForRawData(const void* data, size_t dataSize)
     {
-        customFontCollectionLoader.addCustomRawFontData(data, dataSize);
-
-        if (customFontCollection == nullptr && directWriteFactory != nullptr)
+        if (directWriteFactory != nullptr)
         {
-            directWriteFactory->CreateCustomFontCollection(&customFontCollectionLoader,
-                &customFontCollectionKey,
-                sizeof(customFontCollectionKey),
-                customFontCollection.resetAndGetPointerAddress());
+            auto fontCollectionIndex = customFontCollectionLoader.getFontCollectionIndexForRawData(data, dataSize);
+
+            if (customFontCollection == nullptr)
+            {
+                directWriteFactory->CreateCustomFontCollection(&customFontCollectionLoader,
+                    &customFontCollectionLoader.key,
+                    sizeof(customFontCollectionLoader.key),
+                    customFontCollection.resetAndGetPointerAddress());
+            }
+
+            if (customFontCollection != nullptr)
+            {
+                IDWriteFontFamily* directWriteFontFamily = nullptr;
+                auto hr = customFontCollection->GetFontFamily(fontCollectionIndex, &directWriteFontFamily);
+                if (SUCCEEDED(hr))
+                {
+                    return directWriteFontFamily;
+                }
+            }
         }
+
+        return nullptr;
     }
 #endif
 
@@ -176,10 +187,6 @@ public:
 private:
     DynamicLibrary direct2dDll, directWriteDll;
 
-#if JUCE_DIRECT2D
-    static constexpr char customFontCollectionKey[] = "JUCEDirect2DFactories";
-#endif
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DFactories)
 };
 
@@ -187,13 +194,13 @@ private:
 class WindowsDirectWriteTypeface  : public Typeface
 {
 public:
-    WindowsDirectWriteTypeface (const String& typefaceName, const String& typefaceStyle, IDWriteFontCollection* fontCollection)
-        : Typeface (typefaceName, typefaceStyle)
+    WindowsDirectWriteTypeface (const Font& font, IDWriteFontCollection* fontCollection)
+        : Typeface (font.getTypefaceName(), font.getTypefaceStyle())
     {
         jassert (fontCollection != nullptr);
 
         uint32 fontIndex = 0;
-        auto hr = fontCollection->FindFamilyName (typefaceName.toWideCharPointer(), &fontIndex, &fontFound);
+        auto hr = fontCollection->FindFamilyName (font.getTypefaceName().toWideCharPointer(), &fontIndex, &fontFound);
 
         if (! fontFound)
             fontIndex = 0;
@@ -217,7 +224,7 @@ public:
                 ComSmartPtr<IDWriteLocalizedStrings> faceNames;
                 hr = dwFont->GetFaceNames (faceNames.resetAndGetPointerAddress());
 
-                if (typefaceStyle == getLocalisedName (faceNames))
+                if (font.getTypefaceStyle() == getLocalisedName (faceNames))
                     break;
             }
 
@@ -225,35 +232,63 @@ public:
             hr = dwFont->CreateFontFace (dwFontFace.resetAndGetPointerAddress());
         }
 
-        if (dwFontFace != nullptr)
-        {
-            DWRITE_FONT_METRICS dwFontMetrics;
-            dwFontFace->GetMetrics (&dwFontMetrics);
-
-            // All Font Metrics are in design units so we need to get designUnitsPerEm value
-            // to get the metrics into Em/Design Independent Pixels
-            designUnitsPerEm = dwFontMetrics.designUnitsPerEm;
-
-            ascent = std::abs ((float) dwFontMetrics.ascent);
-            auto totalSize = ascent + std::abs ((float) dwFontMetrics.descent);
-            ascent /= totalSize;
-            unitsToHeightScaleFactor = (float) designUnitsPerEm / totalSize;
-
-            auto tempDC = GetDC (nullptr);
-            auto dpi = (float) (GetDeviceCaps (tempDC, LOGPIXELSX) + GetDeviceCaps (tempDC, LOGPIXELSY)) / 2.0f;
-            heightToPointsFactor = (dpi / (float) GetDeviceCaps (tempDC, LOGPIXELSY)) * unitsToHeightScaleFactor;
-            ReleaseDC (nullptr, tempDC);
-
-            auto pathAscent  = (1024.0f * dwFontMetrics.ascent)  / (float) designUnitsPerEm;
-            auto pathDescent = (1024.0f * dwFontMetrics.descent) / (float) designUnitsPerEm;
-            auto pathScale   = 1.0f / (std::abs (pathAscent) + std::abs (pathDescent));
-            pathTransform = AffineTransform::scale (pathScale);
-        }
+        initializeFromFontFace();
     }
 
-    WindowsDirectWriteTypeface(const Font& font, IDWriteFontCollection* fontCollection)
-        : WindowsDirectWriteTypeface(font.getTypefaceName(), font.getTypefaceStyle(), fontCollection)
+    WindowsDirectWriteTypeface (const void* data, size_t dataSize) :
+        Typeface({}, {})
     {
+        //
+        // Get the DirectWrite font family for the raw data
+        //
+        auto fontFamily = factories->getFontFamilyForRawData(data, dataSize);
+        if (fontFamily == nullptr)
+        {
+            return;
+        }
+
+        //
+        // Get the JUCE typeface name from the DirectWrite font family
+        //
+        {
+            ComSmartPtr<IDWriteLocalizedStrings> familyNames;
+            auto hr = fontFamily->GetFamilyNames(familyNames.resetAndGetPointerAddress());
+            if (FAILED(hr))
+            {
+                return;
+            }
+
+            name = getLocalisedName(familyNames);
+        }
+
+        //
+        // Get the JUCE typeface style from the DirectWrite font and get the font face
+        // 
+        // Only supports one font per family
+        // 
+        {
+            ComSmartPtr<IDWriteFont> directWriteFont;
+            auto hr = fontFamily->GetFont(0, directWriteFont.resetAndGetPointerAddress());
+            if (FAILED(hr))
+            {
+                return;
+            }
+
+            ComSmartPtr<IDWriteLocalizedStrings> faceNames;
+            hr = directWriteFont->GetFaceNames(faceNames.resetAndGetPointerAddress());
+            if (FAILED(hr))
+            {
+                return;
+            }
+
+            fontFound = true;
+
+            style = getLocalisedName(faceNames);
+
+            directWriteFont->CreateFontFace(dwFontFace.resetAndGetPointerAddress());
+        }
+
+        initializeFromFontFace();
     }
 
     bool loadedOk() const noexcept          { return dwFontFace != nullptr; }
@@ -331,6 +366,34 @@ private:
     int designUnitsPerEm = 0;
     AffineTransform pathTransform;
     BOOL fontFound = false;
+
+    void initializeFromFontFace()
+    {
+        if (dwFontFace != nullptr)
+        {
+            DWRITE_FONT_METRICS dwFontMetrics;
+            dwFontFace->GetMetrics(&dwFontMetrics);
+
+            // All Font Metrics are in design units so we need to get designUnitsPerEm value
+            // to get the metrics into Em/Design Independent Pixels
+            designUnitsPerEm = dwFontMetrics.designUnitsPerEm;
+
+            ascent = std::abs((float)dwFontMetrics.ascent);
+            auto totalSize = ascent + std::abs((float)dwFontMetrics.descent);
+            ascent /= totalSize;
+            unitsToHeightScaleFactor = (float)designUnitsPerEm / totalSize;
+
+            auto tempDC = GetDC(nullptr);
+            auto dpi = (float)(GetDeviceCaps(tempDC, LOGPIXELSX) + GetDeviceCaps(tempDC, LOGPIXELSY)) / 2.0f;
+            heightToPointsFactor = (dpi / (float)GetDeviceCaps(tempDC, LOGPIXELSY)) * unitsToHeightScaleFactor;
+            ReleaseDC(nullptr, tempDC);
+
+            auto pathAscent = (1024.0f * dwFontMetrics.ascent) / (float)designUnitsPerEm;
+            auto pathDescent = (1024.0f * dwFontMetrics.descent) / (float)designUnitsPerEm;
+            auto pathScale = 1.0f / (std::abs(pathAscent) + std::abs(pathDescent));
+            pathTransform = AffineTransform::scale(pathScale);
+        }
+    }
 
     struct PathGeometrySink  : public ComBaseClassHelper<IDWriteGeometrySink>
     {

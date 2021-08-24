@@ -137,14 +137,16 @@
  #include "native/juce_mac_IconHelpers.cpp"
 
 #elif JUCE_WINDOWS
+ #if JUCE_DIRECT2D
+  #include "native/juce_win32_DirectWriteCustomFontCollection.cpp"
+ #endif
  #include "native/juce_win32_DirectWriteTypeface.cpp"
  #include "native/juce_win32_DirectWriteTypeLayout.cpp"
  #include "native/juce_win32_Fonts.cpp"
  #include "native/juce_win32_IconHelpers.cpp"
  #if JUCE_DIRECT2D
   #include "native/juce_win32_Direct2DGraphicsContext.cpp"
-  #include "native/juce_win32_DirectWriteCustomFontCollection.cpp"
-#endif
+ #endif
 
 #elif JUCE_LINUX || JUCE_BSD
  #include "native/juce_linux_Fonts.cpp"

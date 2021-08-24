@@ -86,23 +86,28 @@ namespace juce
                 return E_INVALIDARG;
             }
 
-            void addCustomRawFontData(const void* data, size_t dataSize)
+            int getFontCollectionIndexForRawData(const void* data, size_t dataSize)
             {
-                for (auto const& rawData : rawDataArray)
+                for (int i = 0; i < rawDataArray.size(); ++i)
                 {
-                    if (data == rawData.data)
+                    if (data == rawDataArray[i].data)
                     {
-                        return;
+                        //
+                        // Can't change the length of the data
+                        //
+                        jassert(dataSize == rawDataArray[i].numBytes);
+                        return i;
                     }
                 }
-
+                
                 rawDataArray.add({ data, dataSize });
+                return rawDataArray.size() - 1;
             }
         } fontFileLoader;
 
         struct FontFileEnumerator : public ComBaseClassHelper<IDWriteFontFileEnumerator>
         {
-            FontFileEnumerator(IDWriteFactory* factory_, FontFileLoader& fontFileLoader_, void const* /*collectionKey_*/, UINT32 /*collectionKeySize_*/) :
+            FontFileEnumerator(IDWriteFactory* factory_, FontFileLoader& fontFileLoader_) :
                 factory(factory_),
                 fontFileLoader(fontFileLoader_)
             {
@@ -152,7 +157,10 @@ namespace juce
             IDWriteFontFileEnumerator** fontFileEnumerator
         ) override
         {
-            *fontFileEnumerator = new FontFileEnumerator{ factory, fontFileLoader, collectionKey, collectionKeySize };
+            jassert(collectionKeySize == sizeof(key));
+            jassert(0 == std::memcmp(collectionKey, key, collectionKeySize));
+
+            *fontFileEnumerator = new FontFileEnumerator{ factory, fontFileLoader };
             return S_OK;
         }
 
@@ -161,52 +169,11 @@ namespace juce
             return (IDWriteFontFileLoader*)&fontFileLoader;
         }
 
-        void addCustomRawFontData(const void* data, size_t dataSize)
+        int getFontCollectionIndexForRawData(const void* data, size_t dataSize)
         {
-            fontFileLoader.addCustomRawFontData(data, dataSize);
+            return fontFileLoader.getFontCollectionIndexForRawData(data, dataSize);
         }
 
-#if 0
-        Internal(DirectWrite* directWrite_) :
-            fontCollectionLoader(fontFileLoader),
-            directWrite(directWrite_)
-        {
-            auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, direct2dFactory.resetAndGetPointerAddress());
-            if (SUCCEEDED(hr))
-            {
-                hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)directWriteFactory.resetAndGetPointerAddress());
-                if (SUCCEEDED(hr))
-                {
-                    hr = directWriteFactory->RegisterFontFileLoader(&fontFileLoader);
-                    if (SUCCEEDED(hr))
-                    {
-                        hr = directWriteFactory->RegisterFontCollectionLoader(&fontCollectionLoader);
-                        if (SUCCEEDED(hr))
-                        {
-                            hr = directWriteFactory->CreateCustomFontCollection(&fontCollectionLoader,
-                                &testCollectionKey,
-                                sizeof(testCollectionKey),
-                                fontCollection.resetAndGetPointerAddress());
-                            if (SUCCEEDED(hr))
-                            {
-                                DBG("Font family count " << (int)fontCollection->GetFontFamilyCount());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        ~Internal()
-        {
-            if (directWriteFactory)
-            {
-                directWriteFactory->UnregisterFontCollectionLoader(&fontCollectionLoader);
-                directWriteFactory->UnregisterFontFileLoader(&fontFileLoader);
-            }
-        }
-
-        DirectWrite* directWrite;
-#endif
+        static constexpr char key[] = "JUCEDirectWriteCustomFontCollection";
     };
 }
