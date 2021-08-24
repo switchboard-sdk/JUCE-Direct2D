@@ -143,7 +143,8 @@
  #include "native/juce_win32_IconHelpers.cpp"
  #if JUCE_DIRECT2D
   #include "native/juce_win32_Direct2DGraphicsContext.cpp"
- #endif
+  #include "native/juce_win32_DirectWriteCustomFontCollection.cpp"
+#endif
 
 #elif JUCE_LINUX || JUCE_BSD
  #include "native/juce_linux_Fonts.cpp"

@@ -622,7 +622,7 @@ Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
 
 Typeface::Ptr Typeface::createSystemTypefaceFor (const void* data, size_t dataSize)
 {
-#if JUCE_DIRECT2D
+#if 0 // JUCE_DIRECT2D
      SharedResourcePointer<Direct2DFactories> factories;
      factories->addCustomRawFontData(data, dataSize);
      if (factories->customFontCollection != nullptr)
@@ -635,7 +635,9 @@ Typeface::Ptr Typeface::createSystemTypefaceFor (const void* data, size_t dataSi
      }
 #endif
 
-    return new WindowsTypeface (data, dataSize);
+    auto typeface = new WindowsTypeface (data, dataSize);
+    DBG("createSystemTypefaceFor raw " << typeface->getName() << ", " << typeface->getStyle());
+    return typeface;
 }
 
 void Typeface::scanFolderForFonts (const File&)
