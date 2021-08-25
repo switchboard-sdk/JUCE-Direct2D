@@ -243,7 +243,8 @@ public:
 
         initializeFromFontFace();
     }
-
+   
+#if JUCE_DIRECT2D
     WindowsDirectWriteTypeface (const void* data, size_t dataSize) :
         Typeface({}, {})
     {
@@ -299,6 +300,7 @@ public:
 
         initializeFromFontFace();
     }
+#endif
 
     bool loadedOk() const noexcept          { return dwFontFace != nullptr; }
     BOOL isFontFound() const noexcept       { return fontFound; }
