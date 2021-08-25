@@ -147,6 +147,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 };
 
 //==============================================================================
+
 struct Direct2DLowLevelGraphicsContext::SavedState
 {
 public:
@@ -276,31 +277,76 @@ public:
         excludedRegionsClip.clear();
     }
 
+
     void excludeClipRectangle(const Rectangle<int>& r)
     {
+        HRESULT hr = S_OK;
+
         clearExcludedRegionsClip();
 
         //
-        // Make an image the size of the entire render target and fill it with alpha = 1.0
+        // Add the rectangle to excludedRectangles
         //
-        auto size = owner.pimpl->renderingTarget->GetPixelSize();
-        if (excludedRegionsMaskImage.getWidth() != (int)size.width || excludedRegionsMaskImage.getHeight() != (int)size.height)
+        // Make sure to use addWithoutMerging
+        //
+        excludedRegionsClip.excludedRectangles.addWithoutMerging(r.transformedBy(transform));
+
+        //
+        // Make the inner rectangle geometries
+        //
+        auto numInnerRectangles = excludedRegionsClip.excludedRectangles.getNumRectangles();
+        HeapBlock<ID2D1RectangleGeometry*> rectangleGeometries{ numInnerRectangles + 1, true };
+        for (int i = 0; i < numInnerRectangles; ++i)
         {
-            excludedRegionsMaskImage = Image{ Image::ARGB, (int)size.width, (int)size.height, false };
-            excludedRegionsMaskImage.clear({ excludedRegionsMaskImage.getWidth(), excludedRegionsMaskImage.getHeight() }, Colours::black);
+            auto excludedRectangle{ excludedRegionsClip.excludedRectangles.getRectangle(i) };
+            hr = owner.pimpl->factories->d2dFactory->CreateRectangleGeometry(rectangleToRectF(excludedRectangle), rectangleGeometries.getData() + i);
+            if (FAILED(hr))
+            {
+                break;
+            }
         }
 
         //
-        // Fill the excluded region with alpha = 0.0. There may already be other excluded regions with zero alpha in excludedRegionsMaskImage, which is fine.
+        // Make the outer rectangle geometry
         //
-        excludedRegionsMaskImage.clear(r.transformedBy(transform), Colours::transparentBlack);
+        if (SUCCEEDED(hr))
+        {
+            auto size = owner.pimpl->renderingTarget->GetPixelSize();
+            hr = owner.pimpl->factories->d2dFactory->CreateRectangleGeometry({ 0.0f, 0.0f, (float)size.width, (float)size.height },
+                rectangleGeometries.getData() + numInnerRectangles);
+        }
 
         //
-        // Create the bitmap & layer for excludedMaskImage
+        // Make the geometry group
         //
-        excludedRegionsClip.create(owner.pimpl->renderingTarget, excludedRegionsMaskImage, size, D2D1::IdentityMatrix());
+        if (SUCCEEDED(hr))
+        {
+            juce::ComSmartPtr<ID2D1GeometryGroup> geometryGroup;
+            hr = owner.pimpl->factories->d2dFactory->CreateGeometryGroup(D2D1_FILL_MODE_ALTERNATE,
+                (ID2D1Geometry**)rectangleGeometries.getData(),
+                numInnerRectangles + 1,
+                geometryGroup.resetAndGetPointerAddress());
+            if (SUCCEEDED(hr))
+            {
+                //
+                // Create the bitmap & layer for excludedMaskImage
+                //
+                excludedRegionsClip.create(owner.pimpl->renderingTarget, geometryGroup);
 
-        pushClips();
+                pushClips();
+            }
+        }
+
+        //
+        // Clean up
+        //
+        for (int i = 0; i < numInnerRectangles + 1; ++i)
+        {
+            if (auto rectangleGeometry = rectangleGeometries[i])
+            {
+                rectangleGeometry->Release();
+            }
+        }
     }
 
     void popClips()
@@ -591,8 +637,49 @@ public:
             }
         }
 
-    } imageClip, excludedRegionsClip;
-    Image excludedRegionsMaskImage;
+    } imageClip;
+
+    struct
+    {
+        RectangleList<int> excludedRectangles;
+        D2D1_LAYER_PARAMETERS layerParams;
+        ComSmartPtr<ID2D1Layer> layer;
+        bool isClipped = false, shouldClip = false;
+
+        void clear()
+        {
+            shouldClip = false;
+        }
+
+        void create(ID2D1HwndRenderTarget* renderingTarget, ID2D1GeometryGroup* geometryGroup)
+        {
+            if (layer == nullptr)
+                renderingTarget->CreateLayer(layer.resetAndGetPointerAddress());
+
+            layerParams = D2D1::LayerParameters(D2D1::InfiniteRect(), geometryGroup);
+
+            shouldClip = true;
+        }
+
+        void popIfClipped(ID2D1HwndRenderTarget* renderingTarget)
+        {
+            if (isClipped)
+            {
+                renderingTarget->PopLayer();
+                isClipped = false;
+            }
+        }
+
+        void pushIfNeeded(ID2D1HwndRenderTarget* renderingTarget)
+        {
+            if (shouldClip && !isClipped)
+            {
+                renderingTarget->PushLayer(layerParams, layer);
+                isClipped = true;
+            }
+        }
+
+    } excludedRegionsClip;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
