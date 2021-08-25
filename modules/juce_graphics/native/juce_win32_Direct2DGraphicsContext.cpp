@@ -866,7 +866,7 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (transform));
+    pimpl->renderingTarget->SetTransform (transformToMatrix (transform.followedBy (currentState->transform)));
 
     D2D1_SIZE_U size = { (UINT32) image.getWidth(), (UINT32) image.getHeight() };
     auto bp = D2D1::BitmapProperties();
