@@ -105,11 +105,6 @@ public:
                 if (directWriteFactory != nullptr)
                 {
                     directWriteFactory->GetSystemFontCollection(systemFonts.resetAndGetPointerAddress());
-
-#if JUCE_DIRECT2D
-                    directWriteFactory->RegisterFontFileLoader(customFontCollectionLoader.getFontFileLoader());
-                    directWriteFactory->RegisterFontCollectionLoader(&customFontCollectionLoader);
-#endif
                 }
             }
 
@@ -134,10 +129,12 @@ public:
 #if JUCE_DIRECT2D
         if (directWriteFactory != nullptr)
         {
-            directWriteFactory->UnregisterFontCollectionLoader(&customFontCollectionLoader);
-            directWriteFactory->UnregisterFontFileLoader(customFontCollectionLoader.getFontFileLoader());
+            for (auto customFontCollectionLoader : customFontCollectionLoaders)
+            {
+                directWriteFactory->UnregisterFontCollectionLoader(customFontCollectionLoader);
+                directWriteFactory->UnregisterFontFileLoader(customFontCollectionLoader->getFontFileLoader());
+            }
         }
-        customFontCollection = nullptr;
 #endif
         d2dFactory = nullptr;  // (need to make sure these are released before deleting the DynamicLibrary objects)
         directWriteFactory = nullptr;
@@ -150,20 +147,33 @@ public:
     {
         if (directWriteFactory != nullptr)
         {
-            auto fontCollectionIndex = customFontCollectionLoader.getFontCollectionIndexForRawData(data, dataSize);
-
-            if (customFontCollection == nullptr)
+            DirectWriteCustomFontCollectionLoader* customFontCollectionLoader = nullptr;
+            for (auto loader : customFontCollectionLoaders)
             {
-                directWriteFactory->CreateCustomFontCollection(&customFontCollectionLoader,
-                    &customFontCollectionLoader.key,
-                    sizeof(customFontCollectionLoader.key),
-                    customFontCollection.resetAndGetPointerAddress());
+                if (loader->hasRawData(data, dataSize))
+                {
+                    customFontCollectionLoader = loader;
+                    break;
+                }
             }
 
-            if (customFontCollection != nullptr)
+            if (customFontCollectionLoader == nullptr)
+            {
+                customFontCollectionLoader = customFontCollectionLoaders.add(new DirectWriteCustomFontCollectionLoader{ data, dataSize });
+
+                directWriteFactory->RegisterFontFileLoader(customFontCollectionLoader->getFontFileLoader());
+                directWriteFactory->RegisterFontCollectionLoader(customFontCollectionLoader);
+
+                directWriteFactory->CreateCustomFontCollection(customFontCollectionLoader,
+                    &customFontCollectionLoader->key,
+                    sizeof(customFontCollectionLoader->key),
+                    customFontCollectionLoader->customFontCollection.resetAndGetPointerAddress());
+            }
+
+            if (customFontCollectionLoader != nullptr && customFontCollectionLoader->customFontCollection != nullptr)
             {
                 IDWriteFontFamily* directWriteFontFamily = nullptr;
-                auto hr = customFontCollection->GetFontFamily(fontCollectionIndex, &directWriteFontFamily);
+                auto hr = customFontCollectionLoader->customFontCollection->GetFontFamily(0, &directWriteFontFamily);
                 if (SUCCEEDED(hr))
                 {
                     return directWriteFontFamily;
@@ -179,8 +189,7 @@ public:
     ComSmartPtr<IDWriteFactory> directWriteFactory;
     ComSmartPtr<IDWriteFontCollection> systemFonts;
 #if JUCE_DIRECT2D
-    DirectWriteCustomFontCollectionLoader customFontCollectionLoader;
-    ComSmartPtr<IDWriteFontCollection> customFontCollection;
+    OwnedArray<DirectWriteCustomFontCollectionLoader> customFontCollectionLoaders;
 #endif
     ComSmartPtr<ID2D1DCRenderTarget> directWriteRenderTarget;
 

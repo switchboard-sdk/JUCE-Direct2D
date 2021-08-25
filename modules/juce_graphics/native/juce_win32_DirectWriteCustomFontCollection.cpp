@@ -20,22 +20,18 @@ namespace juce
 
             HRESULT GetFileSize(UINT64* fileSize) override
             {
-                DBG("            FontFileStream::GetFileSize");
                 *fileSize = rawData.numBytes;
                 return S_OK;
             }
 
             HRESULT GetLastWriteTime(UINT64* lastWriteTime) override
             {
-                DBG("            FontFileStream::GetLastWriteTime");
                 *lastWriteTime = 0;
                 return S_OK;
             }
 
             HRESULT ReadFileFragment(void const** fragmentStart, UINT64 fileOffset, UINT64 fragmentSize, void** fragmentContext) override
             {
-                //DBG("            FontFileStream::ReadFileFragment fileOffset:" << (int64_t)fileOffset << ", fragmentSize:" << (int64_t)fragmentSize);
-
                 if (fileOffset + fragmentSize >= rawData.numBytes)
                 {
                     *fragmentStart = nullptr;
@@ -66,8 +62,6 @@ namespace juce
 
             HRESULT CreateStreamFromKey(void const* fontFileReferenceKey, UINT32 fontFileReferenceKeySize, IDWriteFontFileStream** fontFileStream) override
             {
-                DBG("         FontFileLoader::CreateStreamFromKey");
-
                 jassert(sizeof(char*) == fontFileReferenceKeySize);
                 if (sizeof(char*) == fontFileReferenceKeySize)
                 {
@@ -84,24 +78,6 @@ namespace juce
 
                 *fontFileStream = nullptr;
                 return E_INVALIDARG;
-            }
-
-            int getFontCollectionIndexForRawData(const void* data, size_t dataSize)
-            {
-                for (int i = 0; i < rawDataArray.size(); ++i)
-                {
-                    if (data == rawDataArray[i].data)
-                    {
-                        //
-                        // Can't change the length of the data
-                        //
-                        jassert(dataSize == rawDataArray[i].numBytes);
-                        return i;
-                    }
-                }
-                
-                rawDataArray.add({ data, dataSize });
-                return rawDataArray.size() - 1;
             }
         } fontFileLoader;
 
@@ -145,8 +121,9 @@ namespace juce
         };
 
     public:
-        DirectWriteCustomFontCollectionLoader()
+        DirectWriteCustomFontCollectionLoader(const void* data, size_t dataSize)
         {
+            fontFileLoader.rawDataArray.add({ data, dataSize });
         }
         ~DirectWriteCustomFontCollectionLoader() override = default;
 
@@ -158,7 +135,7 @@ namespace juce
         ) override
         {
             jassert(collectionKeySize == sizeof(key));
-            jassert(0 == std::memcmp(collectionKey, key, collectionKeySize));
+            jassert(0 == std::memcmp(collectionKey, &key, collectionKeySize));
 
             *fontFileEnumerator = new FontFileEnumerator{ factory, fontFileLoader };
             return S_OK;
@@ -169,11 +146,12 @@ namespace juce
             return (IDWriteFontFileLoader*)&fontFileLoader;
         }
 
-        int getFontCollectionIndexForRawData(const void* data, size_t dataSize)
+        bool hasRawData(const void* data, size_t /*dataSize*/)
         {
-            return fontFileLoader.getFontCollectionIndexForRawData(data, dataSize);
+            return fontFileLoader.rawDataArray.getFirst().data == data;
         }
 
-        static constexpr char key[] = "JUCEDirectWriteCustomFontCollection";
+        ComSmartPtr<IDWriteFontCollection> customFontCollection;
+        int64 const key = Time::getHighResolutionTicks();
     };
 }
