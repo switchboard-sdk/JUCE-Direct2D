@@ -220,9 +220,12 @@ public:
     void clipToRectangle (const Rectangle<int>& r)
     {
         clearClip();
+
+        clipBounds = r;
+
         clipRect = r.toFloat().transformedBy (transform).getSmallestIntegerContainer();
-        clipBounds = clipRect;
         shouldClipRect = true;
+
         pushClips();
     }
 
@@ -264,13 +267,14 @@ public:
     {
         clearRectListClip();
 
-        clipBounds = rectListBounds.toFloat().transformedBy(transform).getSmallestIntegerContainer();
+        clipBounds = rectListBounds;
 
         if (rectListLayer == nullptr)
             owner.pimpl->renderingTarget->CreateLayer (rectListLayer.resetAndGetPointerAddress());
 
         rectListGeometry = geometry;
         shouldClipRectList = true;
+
         pushClips();
     }
 
@@ -765,6 +769,8 @@ void Direct2DLowLevelGraphicsContext::end()
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
 {
+    currentState->clipBounds.setPosition(currentState->clipBounds.getTopLeft() - o);
+
     addTransform (AffineTransform::translation ((float) o.x, (float) o.y));
 }
 
@@ -812,7 +818,7 @@ bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>
 
 Rectangle<int> Direct2DLowLevelGraphicsContext::getClipBounds() const
 {
-    return currentState->clipBounds.toFloat().transformedBy(currentState->transform.inverted()).getSmallestIntegerContainer();
+    return currentState->clipBounds;
 }
 
 bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
