@@ -128,14 +128,14 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform)
+    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
         ID2D1PathGeometry* p = nullptr;
         factories->d2dFactory->CreatePathGeometry (&p);
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open (sink.resetAndGetPointerAddress()); // xxx handle error
-        sink->SetFillMode (D2D1_FILL_MODE_WINDING);
+        sink->SetFillMode (fillMode);
 
         for (int i = clipRegion.getNumRectangles(); --i >= 0;)
             rectToGeometrySink (clipRegion.getRectangle(i), sink, transform);
@@ -314,63 +314,24 @@ public:
         //
         // Make sure to use addWithoutMerging
         //
-        excludedRegionsClip.excludedRectangles.addWithoutMerging(r.transformedBy(transform));
+        excludedRegionsClip.excludedRectangles.addWithoutMerging(r);
 
         //
-        // Make the inner rectangle geometries
+        // Make a copy of the rectangle list and add one big rectangle to the end, again without merging
         //
-        auto numInnerRectangles = excludedRegionsClip.excludedRectangles.getNumRectangles();
-        HeapBlock<ID2D1RectangleGeometry*> rectangleGeometries{ numInnerRectangles + 1, true };
-        for (int i = 0; i < numInnerRectangles; ++i)
+        juce::RectangleList<int> excludedRegionsCopy{ excludedRegionsClip.excludedRectangles };
+
+        auto size = owner.pimpl->renderingTarget->GetPixelSize();
+        excludedRegionsCopy.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
+
+        //
+        // Convert the rectangle list to a Direct2D geometry; use D2D1_FILL_MODE_ALTERNATE so the excluded regions will be outside the geometry
+        //
+        if (auto geometry = owner.pimpl->rectListToPathGeometry(excludedRegionsCopy, transform, D2D1_FILL_MODE_ALTERNATE))
         {
-            auto excludedRectangle{ excludedRegionsClip.excludedRectangles.getRectangle(i) };
-            hr = owner.pimpl->factories->d2dFactory->CreateRectangleGeometry(rectangleToRectF(excludedRectangle), rectangleGeometries.getData() + i);
-            if (FAILED(hr))
-            {
-                break;
-            }
-        }
+            excludedRegionsClip.create(owner.pimpl->renderingTarget, geometry);
 
-        //
-        // Make the outer rectangle geometry
-        //
-        if (SUCCEEDED(hr))
-        {
-            auto size = owner.pimpl->renderingTarget->GetPixelSize();
-            hr = owner.pimpl->factories->d2dFactory->CreateRectangleGeometry({ 0.0f, 0.0f, (float)size.width, (float)size.height },
-                rectangleGeometries.getData() + numInnerRectangles);
-        }
-
-        //
-        // Make the geometry group
-        //
-        if (SUCCEEDED(hr))
-        {
-            juce::ComSmartPtr<ID2D1GeometryGroup> geometryGroup;
-            hr = owner.pimpl->factories->d2dFactory->CreateGeometryGroup(D2D1_FILL_MODE_ALTERNATE,
-                (ID2D1Geometry**)rectangleGeometries.getData(),
-                numInnerRectangles + 1,
-                geometryGroup.resetAndGetPointerAddress());
-            if (SUCCEEDED(hr))
-            {
-                //
-                // Create the bitmap & layer for excludedMaskImage
-                //
-                excludedRegionsClip.create(owner.pimpl->renderingTarget, geometryGroup);
-
-                pushClips();
-            }
-        }
-
-        //
-        // Clean up
-        //
-        for (int i = 0; i < numInnerRectangles + 1; ++i)
-        {
-            if (auto rectangleGeometry = rectangleGeometries[i])
-            {
-                rectangleGeometry->Release();
-            }
+            pushClips();
         }
     }
 
@@ -607,7 +568,7 @@ public:
     ComSmartPtr<ID2D1Layer> rectListLayer;
     bool clipsRectList = false, shouldClipRectList = false;
     
-    struct
+    struct ImageClip
     {
         D2D1_LAYER_PARAMETERS layerParams;
         ComSmartPtr<ID2D1Layer> layer;
@@ -664,7 +625,7 @@ public:
 
     } imageClip;
 
-    struct
+    struct ExcludedRegionsClip
     {
         RectangleList<int> excludedRectangles;
         D2D1_LAYER_PARAMETERS layerParams;
@@ -676,12 +637,12 @@ public:
             shouldClip = false;
         }
 
-        void create(ID2D1HwndRenderTarget* renderingTarget, ID2D1GeometryGroup* geometryGroup)
+        void create(ID2D1HwndRenderTarget* renderingTarget, ID2D1PathGeometry* geometry)
         {
             if (layer == nullptr)
                 renderingTarget->CreateLayer(layer.resetAndGetPointerAddress());
 
-            layerParams = D2D1::LayerParameters(D2D1::InfiniteRect(), geometryGroup);
+            layerParams = D2D1::LayerParameters(D2D1::InfiniteRect(), geometry);
 
             shouldClip = true;
         }
@@ -792,7 +753,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipToRectList (clipRegion.getBounds(), pimpl->rectListToPathGeometry (clipRegion, currentState->transform));
+    currentState->clipToRectList (clipRegion.getBounds(), pimpl->rectListToPathGeometry (clipRegion, currentState->transform, D2D1_FILL_MODE_WINDING));
     return ! isClipEmpty();
 }
 
