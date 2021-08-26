@@ -40,6 +40,7 @@ static D2D1_COLOR_F colourToD2D (Colour c)
 static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
 {
     Path::Iterator it (path);
+    bool figureStarted = false;
 
     while (it.next())
     {
@@ -73,16 +74,34 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
         case Path::Iterator::closePath:
         {
             sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+            figureStarted = false;
             break;
         }
 
         case Path::Iterator::startNewSubPath:
         {
+            if (figureStarted)
+            {
+                //
+                // Calls to BeginFigure and EndFigure must always be paired
+                //
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            }
+
             transform.transformPoint (it.x1, it.y1);
             sink->BeginFigure ({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
+            figureStarted = true;
             break;
         }
         }
+    }
+
+    if (figureStarted)
+    {
+        //
+        // Calls to BeginFigure and EndFigure must always be paired
+        //
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     }
 }
 
@@ -122,6 +141,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             rectToGeometrySink (clipRegion.getRectangle(i), sink, transform);
 
         hr = sink->Close();
+        jassert(SUCCEEDED(hr));
         return p;
     }
 
@@ -137,6 +157,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         pathToGeometrySink (path, sink, transform);
 
         hr = sink->Close();
+        jassert(SUCCEEDED(hr));
         return p;
     }
 
@@ -888,7 +909,6 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
 
 void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
-    // xxx doesn't seem to be correctly aligned, may need nudging by 0.5 to match the software renderer's behaviour
     pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
     currentState->createBrush();
 
