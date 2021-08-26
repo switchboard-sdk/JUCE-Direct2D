@@ -305,8 +305,6 @@ public:
 
     void excludeClipRectangle(const Rectangle<int>& r)
     {
-        HRESULT hr = S_OK;
-
         clearExcludedRegionsClip();
 
         //
@@ -317,7 +315,7 @@ public:
         excludedRegionsClip.excludedRectangles.addWithoutMerging(r);
 
         //
-        // Make a copy of the rectangle list and add one big rectangle to the end, again without merging
+        // Copy the rectangle list and add one big rectangle to the end, again without merging
         //
         juce::RectangleList<int> excludedRegionsCopy{ excludedRegionsClip.excludedRectangles };
 
