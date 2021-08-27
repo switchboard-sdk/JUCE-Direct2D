@@ -140,6 +140,22 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
+    ID2D1PathGeometry* rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+    {
+        ID2D1PathGeometry* p = nullptr;
+        factories->d2dFactory->CreatePathGeometry(&p);
+
+        ComSmartPtr<ID2D1GeometrySink> sink;
+        auto hr = p->Open(sink.resetAndGetPointerAddress()); // xxx handle error
+        sink->SetFillMode(fillMode);
+
+        rectToGeometrySink(rect, sink, transform);
+
+        hr = sink->Close();
+        jassert(SUCCEEDED(hr));
+        return p;
+    }
+
     ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
         ID2D1PathGeometry* p = nullptr;
@@ -194,7 +210,6 @@ public:
             setFill (owner.currentState->fillType);
             currentBrush = owner.currentState->currentBrush;
             clipBounds = owner.currentState->clipBounds;
-            clipRect = owner.currentState->clipRect;
             transform = owner.currentState->transform;
 
             font = owner.currentState->font;
@@ -204,201 +219,40 @@ public:
         {
             const auto size = owner.pimpl->renderingTarget->GetPixelSize();
             clipBounds.setSize (size.width, size.height);
-            clipRect = clipBounds;
             setFill (FillType (Colours::black));
         }
     }
 
     ~SavedState()
     {
-        clearClip();
+        popClipLayers();
         clearFont();
         clearFill();
-        clearPathClip();
-        clearImageClip();
-        clearExcludedRegionsClip();
-        complexClipLayer = nullptr;
-        imageClip.layer = nullptr;
-        excludedRegionsClip.layer = nullptr;
         endTransparency();
     }
 
-    void clearClip()
+    void popClipLayers()
     {
-        popClips();
-        shouldClipRect = false;
-    }
-
-    void clipToRectangle (const Rectangle<int>& r)
-    {
-        clearClip();
-
-        clipBounds = r;
-
-        clipRect = r.toFloat().transformedBy (transform).getSmallestIntegerContainer();
-        shouldClipRect = true;
-
-        pushClips();
-    }
-
-    void clearPathClip()
-    {
-        popClips();
-
-        if (shouldClipComplex)
-        {
-            complexClipGeometry = nullptr;
-            shouldClipComplex = false;
-        }
-    }
-
-    void clipToPath (ID2D1Geometry* geometry)
-    {
-        clearPathClip();
-
-        if (complexClipLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (complexClipLayer.resetAndGetPointerAddress());
-
-        complexClipGeometry = geometry;
-        shouldClipComplex = true;
-        pushClips();
-    }
-
-    void clearRectListClip()
-    {
-        popClips();
-
-        if (shouldClipRectList)
-        {
-            rectListGeometry = nullptr;
-            shouldClipRectList = false;
-        }
-    }
-
-    void clipToRectList (const Rectangle<int> rectListBounds, ID2D1Geometry* geometry)
-    {
-        clearRectListClip();
-
-        clipBounds = rectListBounds;
-
-        if (rectListLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (rectListLayer.resetAndGetPointerAddress());
-
-        rectListGeometry = geometry;
-        shouldClipRectList = true;
-
-        pushClips();
-    }
-
-    void clearImageClip()
-    {
-        popClips();
-
-        imageClip.clear();
-    }
-
-    void clipToImage (const Image& clipImage, const AffineTransform& clipTransform)
-    {
-        clearImageClip();
-
-        auto maskImage = clipImage.convertedToFormat(Image::ARGB);
-        imageClip.create(owner.pimpl->renderingTarget, maskImage, D2D1_SIZE_U{ (UINT32)clipImage.getWidth(), (UINT32)clipImage.getHeight() }, transformToMatrix(clipTransform));
-
-        pushClips();
-    }
-
-    void clearExcludedRegionsClip()
-    {
-        popClips();
-
-        excludedRegionsClip.clear();
-    }
-
-
-    void excludeClipRectangle(const Rectangle<int>& r)
-    {
-        clearExcludedRegionsClip();
-
-        //
-        // Add the rectangle to excludedRectangles
-        //
-        // Make sure to use addWithoutMerging
-        //
-        excludedRegionsClip.excludedRectangles.addWithoutMerging(r);
-
-        //
-        // Copy the rectangle list and add one big rectangle to the end, again without merging
-        //
-        juce::RectangleList<int> excludedRegionsCopy{ excludedRegionsClip.excludedRectangles };
-
-        auto size = owner.pimpl->renderingTarget->GetPixelSize();
-        excludedRegionsCopy.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
-
-        //
-        // Convert the rectangle list to a Direct2D geometry; use D2D1_FILL_MODE_ALTERNATE so the excluded regions will be outside the geometry
-        //
-        if (auto geometry = owner.pimpl->rectListToPathGeometry(excludedRegionsCopy, transform, D2D1_FILL_MODE_ALTERNATE))
-        {
-            excludedRegionsClip.create(owner.pimpl->renderingTarget, geometry);
-
-            pushClips();
-        }
-    }
-
-    void popClips()
-    {
-        excludedRegionsClip.popIfClipped(owner.pimpl->renderingTarget);
-        
-        imageClip.popIfClipped(owner.pimpl->renderingTarget);
-        
-        if (clipsComplex)
+        while (clipLayerPushCount > 0)
         {
             owner.pimpl->renderingTarget->PopLayer();
-            clipsComplex = false;
-        }
-
-        if (clipsRectList)
-        {
-            owner.pimpl->renderingTarget->PopLayer();
-            clipsRectList = false;
-        }
-
-        if (clipsRect)
-        {
-            owner.pimpl->renderingTarget->PopAxisAlignedClip();
-            clipsRect = false;
+            --clipLayerPushCount;
         }
     }
 
-    void pushClips()
+    void pushClipLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
-        if (shouldClipRect && !clipsRect)
-        {
-            owner.pimpl->renderingTarget->PushAxisAlignedClip (rectangleToRectF (clipRect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            clipsRect = true;
-        }
+        //
+        // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
+        //
+        owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
 
-        if (shouldClipRectList && !clipsRectList)
-        {
-            auto layerParams = D2D1::LayerParameters();
-            rectListGeometry->GetBounds (D2D1::IdentityMatrix(), &layerParams.contentBounds);
-            layerParams.geometricMask = rectListGeometry;
-            owner.pimpl->renderingTarget->PushLayer (layerParams, rectListLayer);
-            clipsRectList = true;
-        }
+        ++clipLayerPushCount;
+    }
 
-        if (shouldClipComplex && !clipsComplex)
-        {
-            auto layerParams = D2D1::LayerParameters();
-            complexClipGeometry->GetBounds (D2D1::IdentityMatrix(), &layerParams.contentBounds);
-            layerParams.geometricMask = complexClipGeometry;
-            owner.pimpl->renderingTarget->PushLayer (layerParams, complexClipLayer);
-            clipsComplex = true;
-        }
-
-        imageClip.pushIfNeeded(owner.pimpl->renderingTarget);
-
-        excludedRegionsClip.pushIfNeeded(owner.pimpl->renderingTarget);
+    void pushGeometryClipLayer(ID2D1Geometry* geometry)
+    {
+        pushClipLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
     }
 
     void setFill (const FillType& newFillType)
@@ -562,120 +416,10 @@ public:
 
     Rectangle<int> clipBounds;
 
-    Rectangle<int> clipRect; 
-    bool clipsRect = false, shouldClipRect = false;
+    int clipLayerPushCount = 0;
 
     Image image;
     ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
-
-    ComSmartPtr<ID2D1Geometry> complexClipGeometry;
-    D2D1_LAYER_PARAMETERS complexClipLayerParams;
-    ComSmartPtr<ID2D1Layer> complexClipLayer;
-    bool clipsComplex = false, shouldClipComplex = false;
-
-    ComSmartPtr<ID2D1Geometry> rectListGeometry;
-    D2D1_LAYER_PARAMETERS rectListLayerParams;
-    ComSmartPtr<ID2D1Layer> rectListLayer;
-    bool clipsRectList = false, shouldClipRectList = false;
-    
-    struct ImageClip
-    {
-        D2D1_LAYER_PARAMETERS layerParams;
-        ComSmartPtr<ID2D1Layer> layer;
-        ComSmartPtr<ID2D1Bitmap> bitmap;
-        ComSmartPtr<ID2D1BitmapBrush> brush;
-        bool isClipped = false, shouldClip = false;
-        
-        void clear()
-        {
-            bitmap = nullptr;
-            brush = nullptr;
-            shouldClip = false;
-        }
-
-        void create(ID2D1HwndRenderTarget* renderingTarget, Image const& image, D2D1_SIZE_U size, D2D1_MATRIX_3X2_F matrix)
-        {
-            if (layer == nullptr)
-                renderingTarget->CreateLayer(layer.resetAndGetPointerAddress());
-
-            D2D1_BRUSH_PROPERTIES brushProps = { 1, matrix };
-            auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
-            auto bp = D2D1::BitmapProperties();
-
-            Image::BitmapData bd(image, Image::BitmapData::readOnly); // xxx should be maskImage?
-            bp.pixelFormat = renderingTarget->GetPixelFormat();
-            bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-
-            auto hr = renderingTarget->CreateBitmap(size, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
-            hr = renderingTarget->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
-
-            layerParams = D2D1::LayerParameters();
-            layerParams.opacityBrush = brush;
-
-            shouldClip = true;
-        }
-
-        void popIfClipped(ID2D1HwndRenderTarget* renderingTarget)
-        {
-            if (isClipped)
-            {
-                renderingTarget->PopLayer();
-                isClipped = false;
-            }
-        }
-
-        void pushIfNeeded(ID2D1HwndRenderTarget* renderingTarget)
-        {
-            if (shouldClip && !isClipped)
-            {
-                renderingTarget->PushLayer(layerParams, layer);
-                isClipped = true;
-            }
-        }
-
-    } imageClip;
-
-    struct ExcludedRegionsClip
-    {
-        RectangleList<int> excludedRectangles;
-        D2D1_LAYER_PARAMETERS layerParams;
-        ComSmartPtr<ID2D1Layer> layer;
-        bool isClipped = false, shouldClip = false;
-
-        void clear()
-        {
-            shouldClip = false;
-        }
-
-        void create(ID2D1HwndRenderTarget* renderingTarget, ID2D1PathGeometry* geometry)
-        {
-            if (layer == nullptr)
-                renderingTarget->CreateLayer(layer.resetAndGetPointerAddress());
-
-            layerParams = D2D1::LayerParameters(D2D1::InfiniteRect(), geometry);
-
-            shouldClip = true;
-        }
-
-        void popIfClipped(ID2D1HwndRenderTarget* renderingTarget)
-        {
-            if (isClipped)
-            {
-                renderingTarget->PopLayer();
-                isClipped = false;
-            }
-        }
-
-        void pushIfNeeded(ID2D1HwndRenderTarget* renderingTarget)
-        {
-            if (shouldClip && !isClipped)
-            {
-                renderingTarget->PushLayer(layerParams, layer);
-                isClipped = true;
-            }
-        }
-
-    } excludedRegionsClip;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
@@ -757,29 +501,58 @@ float Direct2DLowLevelGraphicsContext::getPhysicalPixelScaleFactor()
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
-    currentState->clipToRectangle (r);
+    currentState->clipBounds = r;
+
+    currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentState->transform, D2D1_FILL_MODE_WINDING));
+
     return ! isClipEmpty();
 }
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipToRectList (clipRegion.getBounds(), pimpl->rectListToPathGeometry (clipRegion, currentState->transform, D2D1_FILL_MODE_WINDING));
+    currentState->clipBounds = clipRegion.getBounds();
+
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentState->transform, D2D1_FILL_MODE_WINDING));
+
     return ! isClipEmpty();
 }
 
 void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>& r)
 {
-    currentState->excludeClipRectangle(r);
+    RectangleList<int> rectangles{ r };    
+    auto size = pimpl->renderingTarget->GetPixelSize();
+    rectangles.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
+
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->transform, D2D1_FILL_MODE_ALTERNATE));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
-    currentState->clipToPath (pimpl->pathToPathGeometry (path, currentState->transform.followedBy(transform)));
+    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, currentState->transform.followedBy(transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
-    currentState->clipToImage (sourceImage, currentState->transform.followedBy(transform));
+    auto maskImage = sourceImage.convertedToFormat(Image::ARGB);
+
+    ComSmartPtr<ID2D1Bitmap> bitmap;
+    ComSmartPtr<ID2D1BitmapBrush> brush;
+
+    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(currentState->transform.followedBy(transform)) };
+    auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
+    auto bp = D2D1::BitmapProperties();
+
+    Image::BitmapData bd{ maskImage, Image::BitmapData::readOnly };
+    bp.pixelFormat = pimpl->renderingTarget->GetPixelFormat();
+    bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+ 
+    auto hr = pimpl->renderingTarget->CreateBitmap(D2D1_SIZE_U{ (UINT32)maskImage.getWidth(), (UINT32)maskImage.getHeight() }, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
+    hr = pimpl->renderingTarget->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
+
+    auto layerParams = D2D1::LayerParameters();
+    layerParams.opacityBrush = brush;
+
+    currentState->pushClipLayer(layerParams);
 }
 
 bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>& r)
