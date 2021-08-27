@@ -48,6 +48,8 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
         {
         case Path::Iterator::cubicTo:
         {
+            jassert(figureStarted);
+
             transform.transformPoint (it.x1, it.y1);
             transform.transformPoint (it.x2, it.y2);
             transform.transformPoint (it.x3, it.y3);
@@ -58,6 +60,8 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
 
         case Path::Iterator::lineTo:
         {
+            jassert(figureStarted);
+
             transform.transformPoint (it.x1, it.y1);
             sink->AddLine ({ it.x1, it.y1 });
             break;
@@ -65,6 +69,8 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
 
         case Path::Iterator::quadraticTo:
         {
+            jassert(figureStarted);
+
             transform.transformPoint (it.x1, it.y1);
             transform.transformPoint (it.x2, it.y2);
             sink->AddQuadraticBezier ({ { it.x1, it.y1 }, { it.x2, it.y2 } });
@@ -73,8 +79,14 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
 
         case Path::Iterator::closePath:
         {
-            sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-            figureStarted = false;
+            if (figureStarted)
+            {
+                //
+                // Calls to BeginFigure and EndFigure must always be paired
+                //
+	            sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+	            figureStarted = false;
+            }
             break;
         }
 
