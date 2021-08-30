@@ -315,8 +315,8 @@ public:
         {
             if (fillType.isColour())
             {
-                auto colour = colourToD2D (fillType.colour);
-                owner.pimpl->colourBrush->SetColor (colour);
+                updateColourBrush();
+
                 currentBrush = owner.pimpl->colourBrush;
             }
             else if (fillType.isTiledImage())
@@ -402,6 +402,12 @@ public:
             owner.pimpl->renderingTarget->PopLayer();
             transparencyLayer = nullptr;
         }
+    }
+
+    void updateColourBrush()
+    {
+        auto colour = colourToD2D(fillType.colour);
+        owner.pimpl->colourBrush->SetColor(colour);
     }
 
     Direct2DLowLevelGraphicsContext& owner;
@@ -581,6 +587,11 @@ void Direct2DLowLevelGraphicsContext::restoreState()
     jassert (states.size() > 1); //you should never pop the last state!
     states.removeLast (1);
     currentState = states.getLast();
+
+    if (currentState->fillType.isColour())
+    {
+        currentState->updateColourBrush();
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
