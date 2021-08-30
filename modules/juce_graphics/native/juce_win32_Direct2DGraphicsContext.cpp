@@ -534,7 +534,7 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
-    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, currentState->transform.followedBy(transform)));
+    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, transform.followedBy(currentState->transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
@@ -544,7 +544,7 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
     ComSmartPtr<ID2D1Bitmap> bitmap;
     ComSmartPtr<ID2D1BitmapBrush> brush;
 
-    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(currentState->transform.followedBy(transform)) };
+    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(transform.followedBy(currentState->transform)) };
     auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
     auto bp = D2D1::BitmapProperties();
 
