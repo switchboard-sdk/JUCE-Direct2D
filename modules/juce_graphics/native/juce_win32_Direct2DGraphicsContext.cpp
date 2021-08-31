@@ -180,7 +180,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open (sink.resetAndGetPointerAddress());
-        sink->SetFillMode (D2D1_FILL_MODE_WINDING); // xxx need to check Path::isUsingNonZeroWinding()
+        sink->SetFillMode(path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE);
 
         pathToGeometrySink (path, sink, transform);
 
