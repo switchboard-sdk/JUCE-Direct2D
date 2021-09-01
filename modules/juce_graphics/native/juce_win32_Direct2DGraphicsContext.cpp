@@ -175,9 +175,10 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         if (objects.sink != nullptr)
         {
             rectToGeometrySink(rect, objects.sink, transform);
+            return { (ID2D1Geometry*)objects.geometry };
         }
 
-        return { (ID2D1Geometry*) objects.geometry };
+        return nullptr;
     }
 
     ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
@@ -188,9 +189,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         {
             for (int i = clipRegion.getNumRectangles(); --i >= 0;)
                 rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+
+            return { (ID2D1Geometry*)objects.geometry };
         }
 
-        return { (ID2D1Geometry*)objects.geometry };
+        return nullptr;
     }
 
     ComSmartPtr<ID2D1Geometry> pathToPathGeometry (const Path& path, const AffineTransform& transform)
@@ -200,9 +203,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         if (objects.sink != nullptr)
         {
             pathToGeometrySink(path, objects.sink, transform);
+
+            return { (ID2D1Geometry*)objects.geometry };
         }
 
-        return { (ID2D1Geometry*)objects.geometry };
+        return nullptr;
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
@@ -269,7 +274,10 @@ public:
 
     void pushGeometryClipLayer(ComSmartPtr<ID2D1Geometry> geometry)
     {
-        pushClipLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
+        if (geometry != nullptr)
+        {
+            pushClipLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
+        }
     }
 
     void pushAxisAlignedClipLayer(Rectangle<int> r)
@@ -730,7 +738,7 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
     currentState->createBrush();
     ComSmartPtr<ID2D1Geometry> geometry (pimpl->pathToPathGeometry (p, transform.followedBy (currentState->transform)));
 
-    if (pimpl->renderingTarget != nullptr)
+    if (pimpl->renderingTarget != nullptr && geometry != nullptr)
         pimpl->renderingTarget->FillGeometry (geometry, currentState->currentBrush);
 }
 
