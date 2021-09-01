@@ -140,53 +140,69 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
+    struct ScopedGeometryWithSink
+    {
+        ScopedGeometryWithSink(ID2D1Factory* factory, D2D1_FILL_MODE fillMode)
+        {
+            auto hr = factory->CreatePathGeometry(geometry.resetAndGetPointerAddress());
+            if (SUCCEEDED(hr))
+            {
+                hr = geometry->Open(sink.resetAndGetPointerAddress());
+                if (SUCCEEDED(hr))
+                {
+                    sink->SetFillMode(fillMode);
+                }
+            }
+        }
+
+        ~ScopedGeometryWithSink()
+        {
+            if (sink != nullptr)
+            {
+                auto hr = sink->Close();
+                jassert(SUCCEEDED(hr));
+            }
+        }
+
+        ComSmartPtr<ID2D1PathGeometry> geometry;
+        ComSmartPtr<ID2D1GeometrySink> sink;
+    };
+
     ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ComSmartPtr<ID2D1PathGeometry> p;
-        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
+        ScopedGeometryWithSink objects{ factories->d2dFactory, fillMode };
 
-        ComSmartPtr<ID2D1GeometrySink> sink;
-        auto hr = p->Open(sink.resetAndGetPointerAddress()); // xxx handle error
-        sink->SetFillMode(fillMode);
+        if (objects.sink != nullptr)
+        {
+            rectToGeometrySink(rect, objects.sink, transform);
+        }
 
-        rectToGeometrySink(rect, sink, transform);
-
-        hr = sink->Close();
-        jassert(SUCCEEDED(hr));
-        return { (ID2D1Geometry*)p };
+        return { (ID2D1Geometry*) objects.geometry };
     }
 
     ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ComSmartPtr<ID2D1PathGeometry> p;
-        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
+        ScopedGeometryWithSink objects{ factories->d2dFactory, fillMode };
 
-        ComSmartPtr<ID2D1GeometrySink> sink;
-        auto hr = p->Open (sink.resetAndGetPointerAddress()); // xxx handle error
-        sink->SetFillMode (fillMode);
+        if (objects.sink != nullptr)
+        {
+            for (int i = clipRegion.getNumRectangles(); --i >= 0;)
+                rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+        }
 
-        for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-            rectToGeometrySink (clipRegion.getRectangle(i), sink, transform);
-
-        hr = sink->Close();
-        jassert(SUCCEEDED(hr));
-        return { (ID2D1Geometry*)p };
+        return { (ID2D1Geometry*)objects.geometry };
     }
 
     ComSmartPtr<ID2D1Geometry> pathToPathGeometry (const Path& path, const AffineTransform& transform)
     {
-        ComSmartPtr<ID2D1PathGeometry> p;
-        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
+        ScopedGeometryWithSink objects{ factories->d2dFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
 
-        ComSmartPtr<ID2D1GeometrySink> sink;
-        auto hr = p->Open (sink.resetAndGetPointerAddress());
-        sink->SetFillMode(path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE);
+        if (objects.sink != nullptr)
+        {
+            pathToGeometrySink(path, objects.sink, transform);
+        }
 
-        pathToGeometrySink (path, sink, transform);
-
-        hr = sink->Close();
-        jassert(SUCCEEDED(hr));
-        return { (ID2D1Geometry*)p };
+        return { (ID2D1Geometry*)objects.geometry };
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
