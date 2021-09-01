@@ -134,6 +134,8 @@ public:
                 directWriteFactory->UnregisterFontCollectionLoader(customFontCollectionLoader);
                 directWriteFactory->UnregisterFontFileLoader(customFontCollectionLoader->getFontFileLoader());
             }
+
+            customFontCollectionLoaders.clear();
         }
 #endif
         d2dFactory = nullptr;  // (need to make sure these are released before deleting the DynamicLibrary objects)

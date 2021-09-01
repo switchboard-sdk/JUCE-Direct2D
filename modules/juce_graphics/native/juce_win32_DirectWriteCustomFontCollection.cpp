@@ -129,8 +129,13 @@ namespace juce
 
         HRESULT CreateEnumeratorFromKey(
             IDWriteFactory* factory,
+#if JUCE_DEBUG
             void const* collectionKey,
             UINT32 collectionKeySize,
+#else
+            void const* /* collectionKey */,
+            UINT32 /* collectionKeySize */,
+#endif
             IDWriteFontFileEnumerator** fontFileEnumerator
         ) override
         {
