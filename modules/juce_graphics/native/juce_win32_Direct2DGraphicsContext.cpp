@@ -140,10 +140,10 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    ID2D1PathGeometry* rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+    ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ID2D1PathGeometry* p = nullptr;
-        factories->d2dFactory->CreatePathGeometry(&p);
+        ComSmartPtr<ID2D1PathGeometry> p;
+        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open(sink.resetAndGetPointerAddress()); // xxx handle error
@@ -153,13 +153,13 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         hr = sink->Close();
         jassert(SUCCEEDED(hr));
-        return p;
+        return { (ID2D1Geometry*)p };
     }
 
-    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+    ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ID2D1PathGeometry* p = nullptr;
-        factories->d2dFactory->CreatePathGeometry (&p);
+        ComSmartPtr<ID2D1PathGeometry> p;
+        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open (sink.resetAndGetPointerAddress()); // xxx handle error
@@ -170,13 +170,13 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         hr = sink->Close();
         jassert(SUCCEEDED(hr));
-        return p;
+        return { (ID2D1Geometry*)p };
     }
 
-    ID2D1PathGeometry* pathToPathGeometry (const Path& path, const AffineTransform& transform)
+    ComSmartPtr<ID2D1Geometry> pathToPathGeometry (const Path& path, const AffineTransform& transform)
     {
-        ID2D1PathGeometry* p = nullptr;
-        factories->d2dFactory->CreatePathGeometry (&p);
+        ComSmartPtr<ID2D1PathGeometry> p;
+        factories->d2dFactory->CreatePathGeometry(p.resetAndGetPointerAddress());
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open (sink.resetAndGetPointerAddress());
@@ -186,7 +186,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         hr = sink->Close();
         jassert(SUCCEEDED(hr));
-        return p;
+        return { (ID2D1Geometry*)p };
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
@@ -233,11 +233,12 @@ public:
 
     void popClipLayers()
     {
-        while (clipLayerPushCount > 0)
+        for (int index = pushedClipLayers.size() - 1; index >= 0; --index)
         {
-            owner.pimpl->renderingTarget->PopLayer();
-            --clipLayerPushCount;
+            pushedClipLayers[index]->pop();
         }
+
+        pushedClipLayers.clear(true /* deleteObjects */);
     }
 
     void pushClipLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
@@ -247,12 +248,19 @@ public:
         //
         owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
 
-        ++clipLayerPushCount;
+        pushedClipLayers.add(new ClipLayer{ owner.pimpl->renderingTarget });
     }
 
-    void pushGeometryClipLayer(ID2D1Geometry* geometry)
+    void pushGeometryClipLayer(ComSmartPtr<ID2D1Geometry> geometry)
     {
         pushClipLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
+    }
+
+    void pushAxisAlignedClipLayer(Rectangle<int> r)
+    {
+        owner.pimpl->renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+        pushedClipLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
     }
 
     void setFill (const FillType& newFillType)
@@ -430,7 +438,39 @@ public:
 
     Rectangle<int> clipBounds;
 
-    int clipLayerPushCount = 0;
+    struct ClipLayer
+    {
+        ClipLayer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
+            renderingTarget(renderingTarget_)
+        {
+        }
+        virtual ~ClipLayer() = default;
+
+        virtual void pop()
+        {
+            renderingTarget->PopLayer();
+        }
+
+        ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipLayer)
+    };
+
+    struct AxisAlignedClipLayer : public ClipLayer
+    {
+        AxisAlignedClipLayer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
+            ClipLayer(renderingTarget_)
+        {
+        }
+        ~AxisAlignedClipLayer() override = default;
+
+        virtual void pop()
+        {
+            renderingTarget->PopAxisAlignedClip();
+        }
+    };
+
+    OwnedArray<ClipLayer> pushedClipLayers;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
@@ -534,7 +574,14 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
     currentState->clipBounds = r;
 
-    currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentState->transform, D2D1_FILL_MODE_WINDING));
+    if (currentState->transform.isOnlyTranslation())
+    {
+        currentState->pushAxisAlignedClipLayer(r.transformedBy(currentState->transform));
+    }
+    else
+    {
+        currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentState->transform, D2D1_FILL_MODE_WINDING));
+    }
 
     return ! isClipEmpty();
 }
