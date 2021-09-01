@@ -304,7 +304,6 @@ public:
         gradientStops = nullptr;
         linearGradient = nullptr;
         radialGradient = nullptr;
-        tiledImageBitmap = nullptr;
         bitmapBrush = nullptr;
         currentBrush = nullptr;
     }
@@ -324,16 +323,17 @@ public:
                 D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform) };
                 auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
 
-                image = fillType.image;
+                auto image = fillType.image;
 
                 D2D1_SIZE_U size = { (UINT32) image.getWidth(), (UINT32) image.getHeight() };
                 auto bp = D2D1::BitmapProperties();
 
-                this->image = image.convertedToFormat (Image::ARGB);
-                Image::BitmapData bd (this->image, Image::BitmapData::readOnly);
+                image = image.convertedToFormat (Image::ARGB);
+                Image::BitmapData bd (image, Image::BitmapData::readOnly);
                 bp.pixelFormat = owner.pimpl->renderingTarget->GetPixelFormat();
                 bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
+                ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
                 auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
                 hr = owner.pimpl->renderingTarget->CreateBitmapBrush (tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
 
@@ -423,9 +423,6 @@ public:
     Rectangle<int> clipBounds;
 
     int clipLayerPushCount = 0;
-
-    Image image;
-    ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
