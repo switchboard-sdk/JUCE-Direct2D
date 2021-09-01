@@ -180,7 +180,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         ComSmartPtr<ID2D1GeometrySink> sink;
         auto hr = p->Open (sink.resetAndGetPointerAddress());
-        sink->SetFillMode (D2D1_FILL_MODE_WINDING); // xxx need to check Path::isUsingNonZeroWinding()
+        sink->SetFillMode(path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE);
 
         pathToGeometrySink (path, sink, transform);
 
@@ -335,9 +335,16 @@ public:
 
                 ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
                 auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
-                hr = owner.pimpl->renderingTarget->CreateBitmapBrush (tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
-
-                currentBrush = bitmapBrush;
+                jassert(SUCCEEDED(hr));
+                if (SUCCEEDED(hr))
+                {
+                    hr = owner.pimpl->renderingTarget->CreateBitmapBrush(tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
+                    jassert(SUCCEEDED(hr));
+                    if (SUCCEEDED(hr))
+                    {
+                        currentBrush = bitmapBrush;
+                    }
+                }
             }
             else if (fillType.isGradient())
             {
@@ -382,6 +389,7 @@ public:
     void beginTransparency(float opacity)
     {
         auto hr = owner.pimpl->renderingTarget->CreateLayer(nullptr, transparencyLayer.resetAndGetPointerAddress());
+        jassert(SUCCEEDED(hr));
         if (SUCCEEDED(hr))
         {
             owner.pimpl->renderingTarget->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(),
@@ -438,22 +446,42 @@ public:
 };
 
 //==============================================================================
+std::unique_ptr<Direct2DLowLevelGraphicsContext> Direct2DLowLevelGraphicsContext::create(HWND hwnd_)
+{
+    //
+    // Use a static function to create the context that can return nullptr on error
+    //
+    auto context = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd_);
+
+    RECT windowRect;
+    GetClientRect(hwnd_, &windowRect);
+    D2D1_SIZE_U size = { (UINT32)(windowRect.right - windowRect.left), (UINT32)(windowRect.bottom - windowRect.top) };
+    context->bounds.setSize(size.width, size.height);
+
+    auto& pimpl = context->pimpl;
+    if (pimpl->factories->d2dFactory != nullptr)
+    {
+        auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd_, size }, pimpl->renderingTarget.resetAndGetPointerAddress());
+        jassert(SUCCEEDED(hr)); 
+        if (SUCCEEDED(hr))
+        {
+            hr = pimpl->renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), pimpl->colourBrush.resetAndGetPointerAddress());
+            jassert(SUCCEEDED(hr));
+            if (SUCCEEDED(hr))
+            {
+                return context;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
     : hwnd (hwnd_),
       currentState (nullptr),
       pimpl (new Pimpl())
 {
-    RECT windowRect;
-    GetClientRect (hwnd, &windowRect);
-    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
-    bounds.setSize (size.width, size.height);
-
-    if (pimpl->factories->d2dFactory != nullptr)
-    {
-        auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd, size }, pimpl->renderingTarget.resetAndGetPointerAddress());
-        jassert (SUCCEEDED (hr)); ignoreUnused (hr);
-        hr = pimpl->renderingTarget->CreateSolidColorBrush (D2D1::ColorF::ColorF (0.0f, 0.0f, 0.0f, 1.0f), pimpl->colourBrush.resetAndGetPointerAddress());
-    }
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()

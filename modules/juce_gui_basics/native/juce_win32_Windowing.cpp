@@ -2608,7 +2608,7 @@ private:
         if (currentRenderingEngine != direct2DRenderingEngine)
             direct2DContext = nullptr;
         else if (direct2DContext == nullptr)
-            direct2DContext.reset (new Direct2DLowLevelGraphicsContext (hwnd));
+            direct2DContext = Direct2DLowLevelGraphicsContext::create(hwnd);
     }
    #endif
 
