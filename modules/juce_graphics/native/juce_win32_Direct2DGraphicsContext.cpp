@@ -525,7 +525,11 @@ std::unique_ptr<Direct2DLowLevelGraphicsContext> Direct2DLowLevelGraphicsContext
     auto& pimpl = context->pimpl;
     if (pimpl->factories->d2dFactory != nullptr)
     {
-        auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd_, size }, pimpl->renderingTarget.resetAndGetPointerAddress());
+        //
+        // To enable VSync, specify D2D1_PRESENT_OPTIONS_NONE
+        // To disable VSync, specify D2D1_PRESENT_OPTIONS_IMMEDIATELY
+        //
+        auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd_, size, D2D1_PRESENT_OPTIONS_NONE }, pimpl->renderingTarget.resetAndGetPointerAddress());
         jassert(SUCCEEDED(hr)); 
         if (SUCCEEDED(hr))
         {
