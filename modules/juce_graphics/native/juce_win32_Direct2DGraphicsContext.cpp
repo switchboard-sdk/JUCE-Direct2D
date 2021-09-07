@@ -159,8 +159,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         {
             if (sink != nullptr)
             {
-                auto hr = sink->Close();
-                jassert(SUCCEEDED(hr));
+#if JUCE_DEBUG
+                jassert(SUCCEEDED(sink->Close()));
+#else
+                sink->Close();
+#endif
             }
         }
 
