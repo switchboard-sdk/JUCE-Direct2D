@@ -443,7 +443,7 @@ namespace DirectWriteTypeLayout
             }
 
             renderTarget.DrawTextLayout (D2D1::Point2F ((float) area.getX(), y),
-                                         dwTextLayout, d2dBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                                         dwTextLayout, d2dBrush, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
     }
 }
