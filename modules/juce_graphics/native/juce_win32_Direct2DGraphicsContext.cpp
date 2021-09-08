@@ -248,37 +248,36 @@ public:
 
     ~SavedState()
     {
-        popClipLayers();
+        popLayers();
         clearFont();
         clearFill();
-        endTransparency();
     }
 
-    void popClipLayers()
+    void popLayers()
     {
-        for (int index = pushedClipLayers.size() - 1; index >= 0; --index)
+        for (int index = pushedLayers.size() - 1; index >= 0; --index)
         {
-            pushedClipLayers[index]->pop();
+            pushedLayers[index]->pop();
         }
 
-        pushedClipLayers.clear(true /* deleteObjects */);
+        pushedLayers.clear(true /* deleteObjects */);
     }
 
-    void pushClipLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
+    void pushLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
         //
         // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
         //
         owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
 
-        pushedClipLayers.add(new ClipLayer{ owner.pimpl->renderingTarget });
+        pushedLayers.add(new Layer{ owner.pimpl->renderingTarget });
     }
 
     void pushGeometryClipLayer(ComSmartPtr<ID2D1Geometry> geometry)
     {
         if (geometry != nullptr)
         {
-            pushClipLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
+            pushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
         }
     }
 
@@ -286,7 +285,7 @@ public:
     {
         owner.pimpl->renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-        pushedClipLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
+        pushedLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
     }
 
     void setFill (const FillType& newFillType)
@@ -422,28 +421,11 @@ public:
 
     void beginTransparency(float opacity)
     {
-        auto hr = owner.pimpl->renderingTarget->CreateLayer(nullptr, transparencyLayer.resetAndGetPointerAddress());
-        jassert(SUCCEEDED(hr));
-        if (SUCCEEDED(hr))
-        {
-            owner.pimpl->renderingTarget->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(),
-                nullptr,
-                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                D2D1::IdentityMatrix(),
-                opacity,
-                nullptr,
-                D2D1_LAYER_OPTIONS_NONE),
-                transparencyLayer);
-        }
-    }
-
-    void endTransparency()
-    {
-        if (transparencyLayer)
-        {
-            owner.pimpl->renderingTarget->PopLayer();
-            transparencyLayer = nullptr;
-        }
+        pushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(),
+            nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::IdentityMatrix(),
+            opacity));
     }
 
     void updateColourBrush()
@@ -464,13 +446,13 @@ public:
 
     Rectangle<int> clipRect;
 
-    struct ClipLayer
+    struct Layer
     {
-        ClipLayer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
+        Layer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
             renderingTarget(renderingTarget_)
         {
         }
-        virtual ~ClipLayer() = default;
+        virtual ~Layer() = default;
 
         virtual void pop()
         {
@@ -479,13 +461,13 @@ public:
 
         ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
 
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ClipLayer)
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Layer)
     };
 
-    struct AxisAlignedClipLayer : public ClipLayer
+    struct AxisAlignedClipLayer : public Layer
     {
         AxisAlignedClipLayer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
-            ClipLayer(renderingTarget_)
+            Layer(renderingTarget_)
         {
         }
         ~AxisAlignedClipLayer() override = default;
@@ -496,7 +478,7 @@ public:
         }
     };
 
-    OwnedArray<ClipLayer> pushedClipLayers;
+    OwnedArray<Layer> pushedLayers;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
@@ -505,8 +487,6 @@ public:
     ComSmartPtr<ID2D1GradientStopCollection> gradientStops;
 
     FillType fillType;
-
-    ComSmartPtr<ID2D1Layer> transparencyLayer;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SavedState)
 };
@@ -660,7 +640,7 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
     auto layerParams = D2D1::LayerParameters();
     layerParams.opacityBrush = brush;
 
-    currentState->pushClipLayer(layerParams);
+    currentState->pushLayer(layerParams);
 }
 
 bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>& r)
@@ -703,7 +683,9 @@ void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
 
 void Direct2DLowLevelGraphicsContext::endTransparencyLayer()
 {
-    currentState->endTransparency();
+    //
+    // Do nothing; the Direct2D transparency layer will be popped along with the current saved state
+    //
 }
 
 void Direct2DLowLevelGraphicsContext::setFill (const FillType& fillType)
