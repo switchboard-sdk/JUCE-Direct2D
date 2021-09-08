@@ -220,7 +220,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 };
 
 //==============================================================================
-
 struct Direct2DLowLevelGraphicsContext::SavedState
 {
 public:
@@ -233,7 +232,7 @@ public:
             // bottleneck.. Can the same internal objects be shared by multiple state objects, maybe using copy-on-write?
             setFill (owner.currentState->fillType);
             currentBrush = owner.currentState->currentBrush;
-            clipBounds = owner.currentState->clipBounds;
+            clipRect = owner.currentState->clipRect;
             transform = owner.currentState->transform;
 
             font = owner.currentState->font;
@@ -242,7 +241,7 @@ public:
         else
         {
             const auto size = owner.pimpl->renderingTarget->GetPixelSize();
-            clipBounds.setSize (size.width, size.height);
+            clipRect.setSize (size.width, size.height);
             setFill (FillType (Colours::black));
         }
     }
@@ -463,7 +462,7 @@ public:
     IDWriteFontFace* currentFontFace = nullptr;
     ComSmartPtr<IDWriteFontFace> localFontFace;
 
-    Rectangle<int> clipBounds;
+    Rectangle<int> clipRect;
 
     struct ClipLayer
     {
@@ -586,7 +585,7 @@ void Direct2DLowLevelGraphicsContext::end()
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
 {
-    currentState->clipBounds.setPosition(currentState->clipBounds.getTopLeft() - o);
+    currentState->clipRect.setPosition(currentState->clipRect.getTopLeft() - o);
 
     addTransform (AffineTransform::translation ((float) o.x, (float) o.y));
 }
@@ -603,7 +602,7 @@ float Direct2DLowLevelGraphicsContext::getPhysicalPixelScaleFactor()
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
-    currentState->clipBounds = r;
+    currentState->clipRect = r;
 
     if (currentState->transform.isOnlyTranslation())
     {
@@ -619,7 +618,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipBounds = clipRegion.getBounds();
+    currentState->clipRect = clipRegion.getBounds();
 
     currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentState->transform, D2D1_FILL_MODE_WINDING));
 
@@ -671,7 +670,7 @@ bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>
 
 Rectangle<int> Direct2DLowLevelGraphicsContext::getClipBounds() const
 {
-    return currentState->clipBounds;
+    return currentState->clipRect;
 }
 
 bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
