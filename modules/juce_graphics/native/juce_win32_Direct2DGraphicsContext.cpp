@@ -39,6 +39,11 @@ static D2D1_COLOR_F colourToD2D (Colour c)
 
 static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
 {
+    //
+    // Every call to BeginFigure must have a matching call to EndFigure. But - the Path does not necessarily
+    // have matching startNewSubPath and closePath markers. The figureStarted flag indicates if an extra call
+    // to BeginFigure or EndFigure is needed during the iteration loop or when exiting this function.
+    //
     Path::Iterator it (path);
     bool figureStarted = false;
 
@@ -81,9 +86,6 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
         {
             if (figureStarted)
             {
-                //
-                // Calls to BeginFigure and EndFigure must always be paired
-                //
 	            sink->EndFigure (D2D1_FIGURE_END_CLOSED);
 	            figureStarted = false;
             }
@@ -94,9 +96,6 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
         {
             if (figureStarted)
             {
-                //
-                // Calls to BeginFigure and EndFigure must always be paired
-                //
                 sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             }
 
@@ -110,9 +109,6 @@ static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const
 
     if (figureStarted)
     {
-        //
-        // Calls to BeginFigure and EndFigure must always be paired
-        //
         sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     }
 }
@@ -140,6 +136,10 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
+    //
+    // ScopedGeometryWithSink creates an ID2D1PathGeometry object with an open sink. 
+    // D.R.Y. for rectToPathGeometry, rectListToPathGeometry, and pathToPathGeometry
+    //
     struct ScopedGeometryWithSink
     {
         ScopedGeometryWithSink(ID2D1Factory* factory, D2D1_FILL_MODE fillMode)
@@ -253,19 +253,12 @@ public:
         clearFill();
     }
 
-    void popLayers()
-    {
-        for (int index = pushedLayers.size() - 1; index >= 0; --index)
-        {
-            pushedLayers[index]->pop();
-        }
-
-        pushedLayers.clear(true /* deleteObjects */);
-    }
-
     void pushLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
         //
+        // Clipping and transparency are all handled by pushing Direct2D layers. The SavedState creates an internal stack
+        // of Layer objects to keep track of how many layers need to be popped.
+        // 
         // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
         //
         owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
@@ -286,6 +279,19 @@ public:
         owner.pimpl->renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
         pushedLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
+    }
+
+    void popLayers()
+    {
+        //
+        // Pop each layer in reverse order
+        //
+        for (int index = pushedLayers.size() - 1; index >= 0; --index)
+        {
+            pushedLayers[index]->pop();
+        }
+
+        pushedLayers.clear(true /* deleteObjects */);
     }
 
     void setFill (const FillType& newFillType)
@@ -446,6 +452,11 @@ public:
 
     Rectangle<int> clipRect;
 
+    //
+    // Layer struct to keep track of pushed Direct2D layers.
+    // 
+    // Most layers need to be popped by calling PopLayer, unless it's an axis aligned clip layer
+    //
     struct Layer
     {
         Layer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
@@ -586,10 +597,16 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
     if (currentState->transform.isOnlyTranslation())
     {
+        //
+        // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)
+        //
         currentState->pushAxisAlignedClipLayer(r.transformedBy(currentState->transform));
     }
     else
     {
+        //
+        // If the current transform is nontrivial (shear, rotation, etc), then use a transformed geometry for the clip layer
+        //
         currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentState->transform, D2D1_FILL_MODE_WINDING));
     }
 
@@ -607,6 +624,14 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<i
 
 void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>& r)
 {
+    //
+    // To exclude the rectangle r, build a rectangle list with r as the first rectangle and the render target bounds as the second.
+    // 
+    // Then, convert that rectangle list to a geometry, but specify D2D1_FILL_MODE_ALTERNATE so the inside of r is *outside*
+    // the geometry and everything else on the screen is inside the geometry.
+    // 
+    // Have to use addWithoutMerging to build the rectangle list to keep the rectangles separate.
+    //
     RectangleList<int> rectangles{ r };    
     auto size = pimpl->renderingTarget->GetPixelSize();
     rectangles.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
@@ -670,6 +695,9 @@ void Direct2DLowLevelGraphicsContext::restoreState()
     states.removeLast (1);
     currentState = states.getLast();
 
+    //
+    // The solid color brush is shared between states, so restore the previous solid color
+    //
     if (currentState->fillType.isColour())
     {
         currentState->updateColourBrush();
@@ -700,6 +728,9 @@ void Direct2DLowLevelGraphicsContext::setOpacity (float newOpacity)
 
 void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality /*quality*/)
 {
+    //
+    // Need a Direct2D 1.1 device context to implement this
+    //
 }
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*replaceExistingContents*/)

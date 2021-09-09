@@ -129,6 +129,9 @@ public:
 #if JUCE_DIRECT2D
         if (directWriteFactory != nullptr)
         {
+            //
+            // Unregister all the custom font stuff and then clear the array before releasing the factories
+            //
             for (auto customFontCollectionLoader : customFontCollectionLoaders)
             {
                 directWriteFactory->UnregisterFontCollectionLoader(customFontCollectionLoader);
@@ -147,6 +150,10 @@ public:
 #if JUCE_DIRECT2D
     IDWriteFontFamily* getFontFamilyForRawData(const void* data, size_t dataSize)
     {
+        //
+        // Hopefully the raw data here is pointing to a TrueType font file in memory. 
+        // This creates a custom font collection loader (one custom font per font collection)
+        //
         if (directWriteFactory != nullptr)
         {
             DirectWriteCustomFontCollectionLoader* customFontCollectionLoader = nullptr;
@@ -247,8 +254,11 @@ public:
     }
    
 #if JUCE_DIRECT2D
+    //
+    // Alternate constructor for WindowsDirectWriteTypeface to create the typeface from TTF data in memory
+    //
     WindowsDirectWriteTypeface (const void* data, size_t dataSize) :
-        Typeface({}, {})
+        Typeface({}, {}) // set the typeface name & style as empty initially
     {
         //
         // Get the DirectWrite font family for the raw data
@@ -380,6 +390,9 @@ private:
     AffineTransform pathTransform;
     BOOL fontFound = false;
 
+    //
+    // D.R.Y. since this code is common to both constructors
+    //
     void initializeFromFontFace()
     {
         if (dwFontFace != nullptr)
