@@ -139,8 +139,10 @@ namespace juce
             IDWriteFontFileEnumerator** fontFileEnumerator
         ) override
         {
+#if JUCE_DEBUG
             jassert(collectionKeySize == sizeof(key));
             jassert(0 == std::memcmp(collectionKey, &key, collectionKeySize));
+#endif
 
             *fontFileEnumerator = new FontFileEnumerator{ factory, fontFileLoader };
             return S_OK;
