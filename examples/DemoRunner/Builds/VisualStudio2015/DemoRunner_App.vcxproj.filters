@@ -2341,9 +2341,6 @@
     <ClCompile Include="..\..\..\..\modules\juce_graphics\native\juce_win32_Direct2DGraphicsContext.cpp">
       <Filter>JUCE Modules\juce_graphics\native</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\modules\juce_graphics\native\juce_win32_DirectWriteCustomFontCollection.cpp">
-      <Filter>JUCE Modules\juce_graphics\native</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\..\modules\juce_graphics\native\juce_win32_DirectWriteTypeface.cpp">
       <Filter>JUCE Modules\juce_graphics\native</Filter>
     </ClCompile>
