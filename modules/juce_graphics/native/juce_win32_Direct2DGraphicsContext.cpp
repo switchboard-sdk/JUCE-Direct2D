@@ -136,6 +136,11 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 //==============================================================================
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
+    Pimpl(HWND hwnd_) :
+        hwnd(hwnd_)
+    {
+    }
+
     //
     // ScopedGeometryWithSink creates an ID2D1PathGeometry object with an open sink. 
     // D.R.Y. for rectToPathGeometry, rectListToPathGeometry, and pathToPathGeometry
@@ -213,8 +218,41 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return nullptr;
     }
 
+    void createDeviceDependentResources()
+    {
+        if (factories->d2dFactory != nullptr)
+        {
+            if (renderingTarget == nullptr)
+            {
+                RECT r;
+                GetClientRect(hwnd, &r);
+                D2D1_SIZE_U size = D2D1::SizeU(r.right - r.left, r.bottom - r.top);
+
+                //
+                // To enable VSync, specify D2D1_PRESENT_OPTIONS_NONE
+                // To disable VSync, specify D2D1_PRESENT_OPTIONS_IMMEDIATELY
+                //
+                auto hr = factories->d2dFactory->CreateHwndRenderTarget({}, { hwnd, size, D2D1_PRESENT_OPTIONS_NONE }, renderingTarget.resetAndGetPointerAddress());
+                jassertquiet(SUCCEEDED(hr));
+            }
+
+            if (colourBrush == nullptr && renderingTarget != nullptr)
+            {
+                auto hr = renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
+                jassertquiet(SUCCEEDED(hr));
+            }
+        }
+    }
+
+    void discardDeviceDependentResources()
+    {
+        colourBrush = nullptr;
+        renderingTarget = nullptr;
+    }
+
     SharedResourcePointer<Direct2DFactories> factories;
 
+    HWND hwnd = nullptr;
     ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
 };
@@ -240,8 +278,11 @@ public:
         }
         else
         {
-            const auto size = owner.pimpl->renderingTarget->GetPixelSize();
-            clipRect.setSize (size.width, size.height);
+            if (owner.pimpl->renderingTarget != nullptr)
+            {
+                const auto size = owner.pimpl->renderingTarget->GetPixelSize();
+                clipRect.setSize(size.width, size.height);
+            }
             setFill (FillType (Colours::black));
         }
     }
@@ -255,15 +296,18 @@ public:
 
     void pushLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
-        //
-        // Clipping and transparency are all handled by pushing Direct2D layers. The SavedState creates an internal stack
-        // of Layer objects to keep track of how many layers need to be popped.
-        // 
-        // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
-        //
-        owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
-
-        pushedLayers.add(new Layer{ owner.pimpl->renderingTarget });
+        if (owner.pimpl->renderingTarget != nullptr)
+        {
+	        //
+	        // Clipping and transparency are all handled by pushing Direct2D layers. The SavedState creates an internal stack
+	        // of Layer objects to keep track of how many layers need to be popped.
+	        // 
+	        // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
+	        //
+	        owner.pimpl->renderingTarget->PushLayer(layerParameters, nullptr);
+	
+	        pushedLayers.add(new Layer{ owner.pimpl->renderingTarget });
+        }
     }
 
     void pushGeometryClipLayer(ComSmartPtr<ID2D1Geometry> geometry)
@@ -276,9 +320,12 @@ public:
 
     void pushAxisAlignedClipLayer(Rectangle<int> r)
     {
-        owner.pimpl->renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        if (owner.pimpl->renderingTarget != nullptr)
+        {
+            owner.pimpl->renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-        pushedLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
+            pushedLayers.add(new AxisAlignedClipLayer{ owner.pimpl->renderingTarget });
+        }
     }
 
     void popLayers()
@@ -349,7 +396,7 @@ public:
 
     void createBrush()
     {
-        if (currentBrush == nullptr)
+        if (currentBrush == nullptr && owner.pimpl->renderingTarget != nullptr)
         {
             if (fillType.isColour())
             {
@@ -436,8 +483,11 @@ public:
 
     void updateColourBrush()
     {
-        auto colour = colourToD2D(fillType.colour);
-        owner.pimpl->colourBrush->SetColor(colour);
+        if (owner.pimpl->colourBrush != nullptr)
+        {
+            auto colour = colourToD2D(fillType.colour);
+            owner.pimpl->colourBrush->SetColor(colour);
+        }
     }
 
     Direct2DLowLevelGraphicsContext& owner;
@@ -462,6 +512,7 @@ public:
         Layer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
             renderingTarget(renderingTarget_)
         {
+            jassert(renderingTarget_ != nullptr);
         }
         virtual ~Layer() = default;
 
@@ -503,46 +554,14 @@ public:
 };
 
 //==============================================================================
-std::unique_ptr<Direct2DLowLevelGraphicsContext> Direct2DLowLevelGraphicsContext::create(HWND hwnd_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
+    : currentState (nullptr),
+      pimpl (new Pimpl(hwnd_))
 {
-    //
-    // Use a static function to create the context that can return nullptr on error
-    //
-    auto context = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd_);
-
     RECT windowRect;
     GetClientRect(hwnd_, &windowRect);
     D2D1_SIZE_U size = { (UINT32)(windowRect.right - windowRect.left), (UINT32)(windowRect.bottom - windowRect.top) };
-    context->bounds.setSize(size.width, size.height);
-
-    auto& pimpl = context->pimpl;
-    if (pimpl->factories->d2dFactory != nullptr)
-    {
-        //
-        // To enable VSync, specify D2D1_PRESENT_OPTIONS_NONE
-        // To disable VSync, specify D2D1_PRESENT_OPTIONS_IMMEDIATELY
-        //
-        auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd_, size, D2D1_PRESENT_OPTIONS_NONE }, pimpl->renderingTarget.resetAndGetPointerAddress());
-        jassert(SUCCEEDED(hr)); 
-        if (SUCCEEDED(hr))
-        {
-            hr = pimpl->renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), pimpl->colourBrush.resetAndGetPointerAddress());
-            jassert(SUCCEEDED(hr));
-            if (SUCCEEDED(hr))
-            {
-                return context;
-            }
-        }
-    }
-
-    return nullptr;
-}
-
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
-    : hwnd (hwnd_),
-      currentState (nullptr),
-      pimpl (new Pimpl())
-{
+    bounds.setSize(size.width, size.height);
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
@@ -552,26 +571,42 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
 
 void Direct2DLowLevelGraphicsContext::resized()
 {
-    RECT windowRect;
-    GetClientRect (hwnd, &windowRect);
-    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
-
-    pimpl->renderingTarget->Resize (size);
-    bounds.setSize (size.width, size.height);
+    if (pimpl->renderingTarget != nullptr)
+    {
+	    RECT windowRect;
+	    GetClientRect (pimpl->hwnd, &windowRect);
+	    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
+	
+	    pimpl->renderingTarget->Resize (size);
+	    bounds.setSize (size.width, size.height);
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::start()
 {
-    pimpl->renderingTarget->BeginDraw();
-    saveState();
+    pimpl->createDeviceDependentResources();
+
+    if (pimpl->renderingTarget)
+    {
+        pimpl->renderingTarget->BeginDraw();
+        saveState();
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::end()
 {
     states.clear();
     currentState = nullptr;
-    pimpl->renderingTarget->EndDraw();
-    pimpl->renderingTarget->CheckWindowState();
+
+    if (pimpl->renderingTarget != nullptr)
+    {
+        auto hr = pimpl->renderingTarget->EndDraw();
+        if (D2DERR_RECREATE_TARGET == hr)
+        {
+            pimpl->discardDeviceDependentResources();
+        }
+        pimpl->renderingTarget->CheckWindowState();
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)

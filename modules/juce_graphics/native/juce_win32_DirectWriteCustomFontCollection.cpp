@@ -129,20 +129,13 @@ namespace juce
 
         HRESULT CreateEnumeratorFromKey(
             IDWriteFactory* factory,
-#if JUCE_DEBUG
             void const* collectionKey,
             UINT32 collectionKeySize,
-#else
-            void const* /* collectionKey */,
-            UINT32 /* collectionKeySize */,
-#endif
             IDWriteFontFileEnumerator** fontFileEnumerator
         ) override
         {
-#if JUCE_DEBUG
-            jassert(collectionKeySize == sizeof(key));
-            jassert(0 == std::memcmp(collectionKey, &key, collectionKeySize));
-#endif
+            jassertquiet(collectionKeySize == sizeof(key));
+            jassertquiet(0 == std::memcmp(collectionKey, &key, collectionKeySize));
 
             *fontFileEnumerator = new FontFileEnumerator{ factory, fontFileLoader };
             return S_OK;

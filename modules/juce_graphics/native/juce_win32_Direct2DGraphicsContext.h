@@ -37,8 +37,6 @@ public:
     Direct2DLowLevelGraphicsContext(HWND);
     ~Direct2DLowLevelGraphicsContext();
 
-    static std::unique_ptr<Direct2DLowLevelGraphicsContext>create(HWND);
-
     //==============================================================================
     bool isVectorDevice() const override { return false; }
 
@@ -88,8 +86,6 @@ public:
 private:
     struct SavedState;
 
-    HWND hwnd;
-
     SavedState* currentState;
     OwnedArray<SavedState> states;
 
@@ -97,7 +93,6 @@ private:
 
     struct Pimpl;
     std::unique_ptr<Pimpl> pimpl;
-
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DLowLevelGraphicsContext)
 };
