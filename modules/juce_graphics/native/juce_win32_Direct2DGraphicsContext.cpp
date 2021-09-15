@@ -387,7 +387,7 @@ public:
             }
             else if (fillType.isGradient())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform.followedBy(transform)) };
 
                 const int numColors = fillType.gradient->getNumColours();
 
