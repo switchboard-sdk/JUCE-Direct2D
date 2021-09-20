@@ -1627,15 +1627,7 @@ public:
             }
 
             if (deletionChecker != nullptr)
-            {
-
-#if JUCE_DIRECT2D
-                if (direct2DContext != nullptr)
-                    direct2DContext->resized();
-#endif
-
                 handleMovedOrResized();
-            }
 
             if (constrainer != nullptr)
                 constrainer->resizeEnd();
@@ -3367,6 +3359,11 @@ private:
 
         handleMovedOrResized();
 
+#if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
+            direct2DContext->resized();
+#endif
+
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly..
     }
 
@@ -3731,18 +3728,6 @@ private:
                         return 0;
             }
             break;
-
-#if JUCE_DIRECT2D
-            case WM_SIZE:
-            {
-                if (direct2DContext != nullptr)
-                {
-                    direct2DContext->resized();
-                    handlePaintMessage();
-                }
-            }
-            break;
-#endif
 
             //==============================================================================
             case WM_KEYDOWN:

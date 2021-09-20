@@ -262,8 +262,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                                 swapChainDescription.SampleDesc.Count = 1;
                                 swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
                                 swapChainDescription.BufferCount = 2;
-                                swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-                                swapChainDescription.Scaling = DXGI_SCALING_NONE;
+                                swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
                                 hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                     hwnd,
                                     &swapChainDescription,
@@ -289,7 +288,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             if (colourBrush == nullptr && renderingTarget != nullptr)
             {
                 auto hr = renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
-                jassertquiet(SUCCEEDED(hr));
+                jassert(SUCCEEDED(hr));
             }
         }
     }
@@ -707,7 +706,7 @@ void Direct2DLowLevelGraphicsContext::end()
             hr = pimpl->swapChain->Present(1, 0);
         }
 
-        if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+        if (FAILED(hr))
         {
             pimpl->releaseDeviceContext();
         }
