@@ -3365,11 +3365,6 @@ private:
                 return true;
         }
 
-#if JUCE_DIRECT2D
-        if (direct2DContext != nullptr)
-            direct2DContext->resized();
-#endif
-
         handleMovedOrResized();
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly..
@@ -3736,6 +3731,18 @@ private:
                         return 0;
             }
             break;
+
+#if JUCE_DIRECT2D
+            case WM_SIZE:
+            {
+                if (direct2DContext != nullptr)
+                {
+                    direct2DContext->resized();
+                    handlePaintMessage();
+                }
+            }
+            break;
+#endif
 
             //==============================================================================
             case WM_KEYDOWN:

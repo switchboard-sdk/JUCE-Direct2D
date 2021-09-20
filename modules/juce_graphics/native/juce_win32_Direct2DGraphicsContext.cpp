@@ -37,6 +37,11 @@ static D2D1_COLOR_F colourToD2D (Colour c)
     return { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha() };
 }
 
+static bool isTransformOnlyTranslationOrScale(AffineTransform const& transform)
+{
+    return transform.mat01 == 0.0f;
+}
+
 static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
 {
     //
@@ -164,11 +169,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         {
             if (sink != nullptr)
             {
-#if JUCE_DEBUG
-                jassert(SUCCEEDED(sink->Close()));
-#else
-                sink->Close();
-#endif
+                auto hr = sink->Close();
+                jassertquiet(SUCCEEDED(hr));
             }
         }
 
@@ -218,22 +220,70 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return nullptr;
     }
 
-    void createDeviceDependentResources()
+    void createDeviceContext()
     {
         if (factories->d2dFactory != nullptr)
         {
             if (renderingTarget == nullptr)
             {
-                RECT r;
-                GetClientRect(hwnd, &r);
-                D2D1_SIZE_U size = D2D1::SizeU(r.right - r.left, r.bottom - r.top);
+                // This flag adds support for surfaces with a different color channel ordering
+                // than the API default. It is required for compatibility with Direct2D.
+                UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if JUCE_DEBUG
+                creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
 
-                //
-                // To enable VSync, specify D2D1_PRESENT_OPTIONS_NONE
-                // To disable VSync, specify D2D1_PRESENT_OPTIONS_IMMEDIATELY
-                //
-                auto hr = factories->d2dFactory->CreateHwndRenderTarget({}, { hwnd, size, D2D1_PRESENT_OPTIONS_NONE }, renderingTarget.resetAndGetPointerAddress());
-                jassertquiet(SUCCEEDED(hr));
+                juce::ComSmartPtr<ID3D11Device> direct3DDevice;
+                auto hr = D3D11CreateDevice(nullptr,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    nullptr,
+                    creationFlags,
+                    nullptr, 0,
+                    D3D11_SDK_VERSION,
+                    direct3DDevice.resetAndGetPointerAddress(),
+                    nullptr,
+                    nullptr);
+                if (SUCCEEDED(hr))
+                {
+                    juce::ComSmartPtr<IDXGIDevice> dxgiDevice;
+                    hr = direct3DDevice->QueryInterface(dxgiDevice.resetAndGetPointerAddress());
+                    if (SUCCEEDED(hr))
+                    {
+                        juce::ComSmartPtr<IDXGIAdapter> dxgiAdapter;
+                        hr = dxgiDevice->GetAdapter(dxgiAdapter.resetAndGetPointerAddress());
+                        if (SUCCEEDED(hr))
+                        {
+                            juce::ComSmartPtr<IDXGIFactory2> dxgiFactory;
+                            hr = dxgiAdapter->GetParent(__uuidof(dxgiFactory), reinterpret_cast<void**>(dxgiFactory.resetAndGetPointerAddress()));
+                            if (SUCCEEDED(hr))
+                            {
+                                DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
+                                swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                                swapChainDescription.SampleDesc.Count = 1;
+                                swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+                                swapChainDescription.BufferCount = 2;
+                                swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+                                swapChainDescription.Scaling = DXGI_SCALING_NONE;
+                                hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
+                                    hwnd,
+                                    &swapChainDescription,
+                                    nullptr,
+                                    nullptr,
+                                    swapChain.resetAndGetPointerAddress());
+                                if (SUCCEEDED(hr))
+                                {
+                                    juce::ComSmartPtr<ID2D1Device> direct2DDevice;
+                                    hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
+                                    if (SUCCEEDED(hr))
+                                    {
+                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, renderingTarget.resetAndGetPointerAddress());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                jassert(SUCCEEDED(hr));
             }
 
             if (colourBrush == nullptr && renderingTarget != nullptr)
@@ -244,16 +294,46 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         }
     }
 
-    void discardDeviceDependentResources()
+    void releaseDeviceContext()
     {
         colourBrush = nullptr;
+        swapChainBuffer = nullptr;
+        swapChain = nullptr;
         renderingTarget = nullptr;
+    }
+
+    void createSwapChainBuffer()
+    {
+        if (renderingTarget != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
+        {
+            juce::ComSmartPtr<IDXGISurface> surface;
+            auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
+            if (SUCCEEDED(hr))
+            {
+                D2D1_BITMAP_PROPERTIES1 bitmapProperties = {};
+                bitmapProperties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+                bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+                hr = renderingTarget->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
+                jassert(SUCCEEDED(hr));
+#if 0 // xxx how to handle DPI scaling for Windows 8?
+                if (SUCCEEDED(hr))
+                {
+                    UINT GetDpiForWindow(HWND hwnd);
+                    auto dpi = GetDpiForWindow(hwnd);
+                    renderingTarget->SetDpi((float)dpi, (float)dpi);
+                }
+#endif
+            }
+        }
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
 
     HWND hwnd = nullptr;
-    ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
+    juce::ComSmartPtr<ID2D1DeviceContext> renderingTarget;
+    juce::ComSmartPtr<IDXGISwapChain1> swapChain;
+    juce::ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
 };
 
@@ -509,7 +589,7 @@ public:
     //
     struct Layer
     {
-        Layer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
+        Layer(ComSmartPtr<ID2D1DeviceContext>& renderingTarget_) :
             renderingTarget(renderingTarget_)
         {
             jassert(renderingTarget_ != nullptr);
@@ -521,14 +601,14 @@ public:
             renderingTarget->PopLayer();
         }
 
-        ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
+        ComSmartPtr<ID2D1DeviceContext> renderingTarget;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Layer)
     };
 
     struct AxisAlignedClipLayer : public Layer
     {
-        AxisAlignedClipLayer(ComSmartPtr<ID2D1HwndRenderTarget>& renderingTarget_) :
+        AxisAlignedClipLayer(ComSmartPtr<ID2D1DeviceContext>& renderingTarget_) :
             Layer(renderingTarget_)
         {
         }
@@ -573,23 +653,44 @@ void Direct2DLowLevelGraphicsContext::resized()
 {
     if (pimpl->renderingTarget != nullptr)
     {
+        pimpl->renderingTarget->SetTarget(nullptr);
+    }
+
+    if (pimpl->swapChain != nullptr)
+    {
+        pimpl->swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
+
 	    RECT windowRect;
 	    GetClientRect (pimpl->hwnd, &windowRect);
-	    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
+        auto width = windowRect.right - windowRect.left;
+        auto height = windowRect.bottom - windowRect.top;
 	
-	    pimpl->renderingTarget->Resize (size);
-	    bounds.setSize (size.width, size.height);
+        auto hr = pimpl->swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+        if (SUCCEEDED(hr))
+        {
+            pimpl->createSwapChainBuffer();
+        }
+        else
+        {
+            pimpl->releaseDeviceContext();
+        }
+
+	    bounds.setSize (width, height);
     }
 }
 
 void Direct2DLowLevelGraphicsContext::start()
 {
-    pimpl->createDeviceDependentResources();
-
-    if (pimpl->renderingTarget)
+    pimpl->createDeviceContext();
+    if (pimpl->renderingTarget != nullptr)
     {
-        pimpl->renderingTarget->BeginDraw();
-        saveState();
+        pimpl->createSwapChainBuffer();
+        if (pimpl->swapChainBuffer != nullptr)
+        {
+            pimpl->renderingTarget->SetTarget(pimpl->swapChainBuffer);
+            pimpl->renderingTarget->BeginDraw();
+            saveState();
+        }
     }
 }
 
@@ -598,14 +699,18 @@ void Direct2DLowLevelGraphicsContext::end()
     states.clear();
     currentState = nullptr;
 
-    if (pimpl->renderingTarget != nullptr)
+    if (pimpl->renderingTarget != nullptr && pimpl->swapChain != nullptr)
     {
         auto hr = pimpl->renderingTarget->EndDraw();
-        if (D2DERR_RECREATE_TARGET == hr)
+        if (SUCCEEDED(hr))
         {
-            pimpl->discardDeviceDependentResources();
+            hr = pimpl->swapChain->Present(1, 0);
         }
-        pimpl->renderingTarget->CheckWindowState();
+
+        if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+        {
+            pimpl->releaseDeviceContext();
+        }
     }
 }
 
@@ -630,7 +735,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
     currentState->clipRect = r;
 
-    if (currentState->transform.isOnlyTranslation())
+    if (isTransformOnlyTranslationOrScale(currentState->transform))
     {
         //
         // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)

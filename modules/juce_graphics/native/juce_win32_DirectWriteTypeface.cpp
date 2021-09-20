@@ -85,9 +85,12 @@ public:
             if (d2d1CreateFactory != nullptr)
             {
                 D2D1_FACTORY_OPTIONS options;
+#if JUCE_DEBUG
+                options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+#else
                 options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
-
-                d2d1CreateFactory (D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof (ID2D1Factory), &options,
+#endif
+                d2d1CreateFactory (D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof (ID2D1Factory1), &options,
                                    (void**) d2dFactory.resetAndGetPointerAddress());
             }
         }
@@ -194,7 +197,7 @@ public:
     }
 #endif
 
-    ComSmartPtr<ID2D1Factory> d2dFactory;
+    ComSmartPtr<ID2D1Factory1> d2dFactory;
     ComSmartPtr<IDWriteFactory> directWriteFactory;
     ComSmartPtr<IDWriteFontCollection> systemFonts;
 #if JUCE_DIRECT2D
