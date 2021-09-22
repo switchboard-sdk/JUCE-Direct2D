@@ -93,6 +93,7 @@
   #if JUCE_DIRECT2D
    #pragma comment (lib, "Dwrite.lib")
    #pragma comment (lib, "D2d1.lib")
+   #pragma comment (lib, "D3D11.lib")
   #endif
  #endif
 #endif
