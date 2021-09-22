@@ -2424,16 +2424,10 @@ private:
        #if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
-            RECT r;
-
-            if (GetUpdateRect (hwnd, &r, false))
-            {
-                direct2DContext->start();
-                direct2DContext->clipToRectangle (convertPhysicalScreenRectangleToLogical (rectangleFromRECT (r), hwnd));
-                handlePaint (*direct2DContext);
-                direct2DContext->end();
-                ValidateRect (hwnd, &r);
-            }
+            direct2DContext->start();
+            handlePaint (*direct2DContext);
+            direct2DContext->end();
+            ValidateRect (hwnd, nullptr);
         }
         else
        #endif

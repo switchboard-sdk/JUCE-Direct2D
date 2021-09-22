@@ -707,7 +707,7 @@ void Direct2DLowLevelGraphicsContext::end()
         auto hr = pimpl->renderingTarget->EndDraw();
         if (SUCCEEDED(hr))
         {
-            hr = pimpl->swapChain->Present(1, 0);
+            hr = pimpl->swapChain->Present(1, D2D1_PRESENT_OPTIONS_NONE);
         }
 
         if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
