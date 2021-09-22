@@ -82,7 +82,8 @@ bool Graphics::isVectorDevice() const
 bool Graphics::reduceClipRegion (Rectangle<int> area)
 {
     saveStateIfPending();
-    return context.clipToRectangle (area);
+    bool flag = context.clipToRectangle (area);
+    return flag;
 }
 
 bool Graphics::reduceClipRegion (int x, int y, int w, int h)
@@ -93,7 +94,8 @@ bool Graphics::reduceClipRegion (int x, int y, int w, int h)
 bool Graphics::reduceClipRegion (const RectangleList<int>& clipRegion)
 {
     saveStateIfPending();
-    return context.clipToRectangleList (clipRegion);
+    auto flag = context.clipToRectangleList (clipRegion);
+    return flag;
 }
 
 bool Graphics::reduceClipRegion (const Path& path, const AffineTransform& transform)
@@ -107,7 +109,7 @@ bool Graphics::reduceClipRegion (const Image& image, const AffineTransform& tran
 {
     saveStateIfPending();
     context.clipToImageAlpha (image, transform);
-    return ! context.isClipEmpty();
+    return !context.isClipEmpty();
 }
 
 void Graphics::excludeClipRegion (Rectangle<int> rectangleToExclude)

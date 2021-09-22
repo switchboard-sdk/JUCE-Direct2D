@@ -688,14 +688,18 @@ void Direct2DLowLevelGraphicsContext::start()
         {
             pimpl->renderingTarget->SetTarget(pimpl->swapChainBuffer);
             pimpl->renderingTarget->BeginDraw();
-            saveState();
         }
     }
+
+    saveState();
 }
 
 void Direct2DLowLevelGraphicsContext::end()
 {
-    states.clear();
+    while (states.size() > 0)
+    {
+        states.removeLast(1);
+    }
     currentState = nullptr;
 
     if (pimpl->renderingTarget != nullptr && pimpl->swapChain != nullptr)
@@ -706,7 +710,7 @@ void Direct2DLowLevelGraphicsContext::end()
             hr = pimpl->swapChain->Present(1, 0);
         }
 
-        if (FAILED(hr))
+        if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
         {
             pimpl->releaseDeviceContext();
         }
