@@ -261,7 +261,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                                 swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
                                 swapChainDescription.SampleDesc.Count = 1;
                                 swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-                                swapChainDescription.BufferCount = 2;
+                                swapChainDescription.BufferCount = 1;
                                 swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
                                 hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                     hwnd,
