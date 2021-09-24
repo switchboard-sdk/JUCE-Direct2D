@@ -39,7 +39,7 @@ static D2D1_COLOR_F colourToD2D (Colour c)
 
 static bool isTransformOnlyTranslationOrScale(AffineTransform const& transform)
 {
-    return transform.mat01 == 0.0f;
+    return approximatelyEqual(transform.mat01, 0.0f) && approximatelyEqual(transform.mat10, 0.0f);
 }
 
 static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
@@ -349,8 +349,8 @@ public:
             // bottleneck.. Can the same internal objects be shared by multiple state objects, maybe using copy-on-write?
             setFill (owner.currentState->fillType);
             currentBrush = owner.currentState->currentBrush;
-            clipRect = owner.currentState->clipRect;
-            transform = owner.currentState->transform;
+            clipRegion = owner.currentState->clipRegion;
+            currentTransform = owner.currentState->currentTransform;
 
             font = owner.currentState->font;
             currentFontFace = owner.currentState->currentFontFace;
@@ -360,9 +360,9 @@ public:
             if (owner.pimpl->renderingTarget != nullptr)
             {
                 const auto size = owner.pimpl->renderingTarget->GetPixelSize();
-                clipRect.setSize(size.width, size.height);
+                clipRegion.setSize(size.width, size.height);
             }
-            setFill (FillType (Colours::black));
+            setFill(FillType(Colours::black));
         }
     }
 
@@ -513,7 +513,7 @@ public:
             }
             else if (fillType.isGradient())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform.followedBy(transform)) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (currentTransform.getTransformWith(fillType.transform)) };
 
                 const int numColors = fillType.gradient->getNumColours();
 
@@ -569,18 +569,6 @@ public:
         }
     }
 
-    Direct2DLowLevelGraphicsContext& owner;
-
-    AffineTransform transform;
-
-    Font font;
-    float fontHeightToEmSizeFactor = 1.0f;
-
-    IDWriteFontFace* currentFontFace = nullptr;
-    ComSmartPtr<IDWriteFontFace> localFontFace;
-
-    Rectangle<int> clipRect;
-
     //
     // Layer struct to keep track of pushed Direct2D layers.
     // 
@@ -618,6 +606,17 @@ public:
             renderingTarget->PopAxisAlignedClip();
         }
     };
+
+    Direct2DLowLevelGraphicsContext& owner;
+
+    RenderingHelpers::TranslationOrTransform currentTransform;
+    Rectangle<int> clipRegion;
+
+    Font font;
+    float fontHeightToEmSizeFactor = 1.0f;
+
+    IDWriteFontFace* currentFontFace = nullptr;
+    ComSmartPtr<IDWriteFontFace> localFontFace;
 
     OwnedArray<Layer> pushedLayers;
 
@@ -719,38 +718,41 @@ void Direct2DLowLevelGraphicsContext::end()
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
 {
-    currentState->clipRect.setPosition(currentState->clipRect.getTopLeft() - o);
-
-    addTransform (AffineTransform::translation ((float) o.x, (float) o.y));
+    currentState->currentTransform.setOrigin(o);
 }
 
 void Direct2DLowLevelGraphicsContext::addTransform (const AffineTransform& transform)
 {
-    currentState->transform = transform.followedBy (currentState->transform);
+    currentState->currentTransform.addTransform(transform);
 }
 
 float Direct2DLowLevelGraphicsContext::getPhysicalPixelScaleFactor()
 {
-    return std::sqrt (std::abs (currentState->transform.getDeterminant()));
+    return currentState->currentTransform.getPhysicalPixelScaleFactor();
 }
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
-    currentState->clipRect = r;
+    //
+    // Update the current clip region (only used for getClipBounds)
+    //
+    auto currentTransform = currentState->currentTransform.getTransform();
+    auto transformedR = r.transformedBy(currentTransform);
+    currentState->clipRegion.intersectRectangle(transformedR);
 
-    if (isTransformOnlyTranslationOrScale(currentState->transform))
+    if (isTransformOnlyTranslationOrScale(currentTransform))
     {
         //
         // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)
         //
-        currentState->pushAxisAlignedClipLayer(r.transformedBy(currentState->transform));
+        currentState->pushAxisAlignedClipLayer(transformedR);
     }
     else
     {
         //
         // If the current transform is nontrivial (shear, rotation, etc), then use a transformed geometry for the clip layer
         //
-        currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentState->transform, D2D1_FILL_MODE_WINDING));
+        currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentTransform, D2D1_FILL_MODE_WINDING));
     }
 
     return ! isClipEmpty();
@@ -758,9 +760,11 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipRect = clipRegion.getBounds();
+    auto const currentTransform = currentState->currentTransform.getTransform();
+    auto transformedR = clipRegion.getBounds().transformedBy(currentTransform);
+    currentState->clipRegion.intersectRectangle(transformedR);
 
-    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentState->transform, D2D1_FILL_MODE_WINDING));
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentTransform, D2D1_FILL_MODE_WINDING));
 
     return ! isClipEmpty();
 }
@@ -779,12 +783,12 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
     auto size = pimpl->renderingTarget->GetPixelSize();
     rectangles.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
 
-    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->transform, D2D1_FILL_MODE_ALTERNATE));
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_ALTERNATE));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
-    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, transform.followedBy(currentState->transform)));
+    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, currentState->currentTransform.getTransformWith(transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
@@ -794,7 +798,7 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
     ComSmartPtr<ID2D1Bitmap> bitmap;
     ComSmartPtr<ID2D1BitmapBrush> brush;
 
-    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(transform.followedBy(currentState->transform)) };
+    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(currentState->currentTransform.getTransformWith(transform)) };
     auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
     auto bp = D2D1::BitmapProperties();
 
@@ -818,7 +822,7 @@ bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>
 
 Rectangle<int> Direct2DLowLevelGraphicsContext::getClipBounds() const
 {
-    return currentState->clipRect;
+    return currentState->currentTransform.deviceSpaceToUserSpace(currentState->clipRegion);
 }
 
 bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
@@ -883,7 +887,7 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
+    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->currentTransform.getTransform()));
     currentState->createBrush();
     pimpl->renderingTarget->FillRectangle (rectangleToRectF (r), currentState->currentBrush);
     pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
@@ -898,7 +902,7 @@ void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& 
 void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTransform& transform)
 {
     currentState->createBrush();
-    ComSmartPtr<ID2D1Geometry> geometry (pimpl->pathToPathGeometry (p, transform.followedBy (currentState->transform)));
+    ComSmartPtr<ID2D1Geometry> geometry(pimpl->pathToPathGeometry(p, currentState->currentTransform.getTransformWith(transform)));
 
     if (pimpl->renderingTarget != nullptr && geometry != nullptr)
         pimpl->renderingTarget->FillGeometry (geometry, currentState->currentBrush);
@@ -906,7 +910,7 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (transform.followedBy (currentState->transform)));
+    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->currentTransform.getTransformWith(transform)));
 
     D2D1_SIZE_U size = { (UINT32) image.getWidth(), (UINT32) image.getHeight() };
     auto bp = D2D1::BitmapProperties();
@@ -928,7 +932,7 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
 
 void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
+    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->currentTransform.getTransform()));
     currentState->createBrush();
 
     pimpl->renderingTarget->DrawLine (D2D1::Point2F (line.getStartX(), line.getStartY()),
@@ -956,7 +960,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
 
     pimpl->renderingTarget->SetTransform (transformToMatrix (AffineTransform::scale (hScale, 1.0f)
                                                                              .followedBy (transform)
-                                                                             .followedBy (currentState->transform)));
+                                                                             .followedBy (currentState->currentTransform.getTransform())));
 
     const auto glyphIndices = (UINT16) glyphNumber;
     const auto glyphAdvances = 0.0f;
@@ -978,7 +982,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
 
 bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& text, const Rectangle<float>& area)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
+    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->currentTransform.getTransform()));
 
     DirectWriteTypeLayout::drawToD2DContext (text, area,
                                              *(pimpl->renderingTarget),
