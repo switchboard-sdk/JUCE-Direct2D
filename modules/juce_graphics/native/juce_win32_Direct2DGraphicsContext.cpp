@@ -636,10 +636,6 @@ Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
     : currentState (nullptr),
       pimpl (new Pimpl(hwnd_))
 {
-    RECT windowRect;
-    GetClientRect(hwnd_, &windowRect);
-    D2D1_SIZE_U size = { (UINT32)(windowRect.right - windowRect.left), (UINT32)(windowRect.bottom - windowRect.top) };
-    bounds.setSize(size.width, size.height);
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
@@ -672,8 +668,6 @@ void Direct2DLowLevelGraphicsContext::resized()
         {
             pimpl->releaseDeviceContext();
         }
-
-	    bounds.setSize (width, height);
     }
 }
 
@@ -793,12 +787,16 @@ void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const Affine
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
+    auto chainedTransform = currentState->currentTransform.getTransformWith(transform);
+    auto transformedR = sourceImage.getBounds().transformedBy(chainedTransform);
+    transformedR.intersectRectangle(currentState->clipRegion);
+
     auto maskImage = sourceImage.convertedToFormat(Image::ARGB);
 
     ComSmartPtr<ID2D1Bitmap> bitmap;
     ComSmartPtr<ID2D1BitmapBrush> brush;
 
-    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(currentState->currentTransform.getTransformWith(transform)) };
+    D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(chainedTransform) };
     auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
     auto bp = D2D1::BitmapProperties();
 

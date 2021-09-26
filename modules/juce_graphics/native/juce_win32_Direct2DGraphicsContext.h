@@ -89,8 +89,6 @@ private:
     SavedState* currentState;
     OwnedArray<SavedState> states;
 
-    Rectangle<int> bounds;
-
     struct Pimpl;
     std::unique_ptr<Pimpl> pimpl;
 
