@@ -738,7 +738,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
     //
     auto currentTransform = currentState->currentTransform.getTransform();
     auto transformedR = r.transformedBy(currentTransform);
-    currentState->clipRegion.intersectRectangle(transformedR);
+    transformedR.intersectRectangle(currentState->clipRegion);
 
     if (isTransformOnlyTranslationOrScale(currentTransform))
     {
@@ -762,7 +762,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<i
 {
     auto const currentTransform = currentState->currentTransform.getTransform();
     auto transformedR = clipRegion.getBounds().transformedBy(currentTransform);
-    currentState->clipRegion.intersectRectangle(transformedR);
+    transformedR.intersectRectangle(currentState->clipRegion);
 
     currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentTransform, D2D1_FILL_MODE_WINDING));
 
