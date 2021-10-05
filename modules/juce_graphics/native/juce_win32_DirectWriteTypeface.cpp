@@ -310,7 +310,11 @@ public:
 
             style = getLocalisedName(faceNames);
 
-            directWriteFont->CreateFontFace(dwFontFace.resetAndGetPointerAddress());
+            hr = directWriteFont->CreateFontFace(dwFontFace.resetAndGetPointerAddress());
+            if (FAILED(hr))
+            {
+                return;
+            }
         }
 
         initializeFromFontFace();
