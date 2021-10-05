@@ -954,6 +954,12 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
     currentState->createBrush();
     currentState->createFont();
 
+    jassert(currentState->currentFontFace);
+    if (currentState->currentFontFace == nullptr)
+    {
+        return;
+    }
+
     auto hScale = currentState->font.getHorizontalScale();
 
     pimpl->renderingTarget->SetTransform (transformToMatrix (AffineTransform::scale (hScale, 1.0f)
