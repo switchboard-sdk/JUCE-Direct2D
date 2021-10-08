@@ -55,9 +55,7 @@ namespace juce
         {
             Array<FontRawData> rawDataArray;
 
-            FontFileLoader()
-            {
-            }
+            FontFileLoader() = default;
             ~FontFileLoader() override = default;
 
             HRESULT CreateStreamFromKey(void const* fontFileReferenceKey, UINT32 fontFileReferenceKeySize, IDWriteFontFileStream** fontFileStream) override
@@ -93,10 +91,8 @@ namespace juce
 
             HRESULT GetCurrentFontFile(IDWriteFontFile** fontFile) override
             {
-                DBG("   FontFileEnumerator::GetCurrentFontFile rawDataIndex:" << rawDataIndex);
                 if (rawDataIndex < 0 || rawDataIndex >= fontFileLoader.rawDataArray.size())
                 {
-                    DBG("      rawDataIndex " << rawDataIndex << " out of range");
                     *fontFile = nullptr;
                     return E_FAIL;
                 }
