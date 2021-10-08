@@ -55,9 +55,7 @@ namespace juce
         {
             Array<FontRawData> rawDataArray;
 
-            FontFileLoader()
-            {
-            }
+            FontFileLoader() = default;
             ~FontFileLoader() override = default;
 
             HRESULT CreateStreamFromKey(void const* fontFileReferenceKey, UINT32 fontFileReferenceKeySize, IDWriteFontFileStream** fontFileStream) override

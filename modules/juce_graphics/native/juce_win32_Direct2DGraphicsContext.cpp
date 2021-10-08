@@ -233,7 +233,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                 creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
-                juce::ComSmartPtr<ID3D11Device> direct3DDevice;
+                ComSmartPtr<ID3D11Device> direct3DDevice;
                 auto hr = D3D11CreateDevice(nullptr,
                     D3D_DRIVER_TYPE_HARDWARE,
                     nullptr,
@@ -245,15 +245,15 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                     nullptr);
                 if (SUCCEEDED(hr))
                 {
-                    juce::ComSmartPtr<IDXGIDevice> dxgiDevice;
+                    ComSmartPtr<IDXGIDevice> dxgiDevice;
                     hr = direct3DDevice->QueryInterface(dxgiDevice.resetAndGetPointerAddress());
                     if (SUCCEEDED(hr))
                     {
-                        juce::ComSmartPtr<IDXGIAdapter> dxgiAdapter;
+                        ComSmartPtr<IDXGIAdapter> dxgiAdapter;
                         hr = dxgiDevice->GetAdapter(dxgiAdapter.resetAndGetPointerAddress());
                         if (SUCCEEDED(hr))
                         {
-                            juce::ComSmartPtr<IDXGIFactory2> dxgiFactory;
+                            ComSmartPtr<IDXGIFactory2> dxgiFactory;
                             hr = dxgiAdapter->GetParent(__uuidof(dxgiFactory), reinterpret_cast<void**>(dxgiFactory.resetAndGetPointerAddress()));
                             if (SUCCEEDED(hr))
                             {
@@ -271,7 +271,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                                     swapChain.resetAndGetPointerAddress());
                                 if (SUCCEEDED(hr))
                                 {
-                                    juce::ComSmartPtr<ID2D1Device> direct2DDevice;
+                                    ComSmartPtr<ID2D1Device> direct2DDevice;
                                     hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                     if (SUCCEEDED(hr))
                                     {
@@ -305,7 +305,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
     {
         if (renderingTarget != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
         {
-            juce::ComSmartPtr<IDXGISurface> surface;
+            ComSmartPtr<IDXGISurface> surface;
             auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
             if (SUCCEEDED(hr))
             {
@@ -330,9 +330,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
     SharedResourcePointer<Direct2DFactories> factories;
 
     HWND hwnd = nullptr;
-    juce::ComSmartPtr<ID2D1DeviceContext> renderingTarget;
-    juce::ComSmartPtr<IDXGISwapChain1> swapChain;
-    juce::ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
+    ComSmartPtr<ID2D1DeviceContext> renderingTarget;
+    ComSmartPtr<IDXGISwapChain1> swapChain;
+    ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
 };
 
