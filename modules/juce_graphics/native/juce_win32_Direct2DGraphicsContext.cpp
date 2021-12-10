@@ -447,11 +447,12 @@ public:
     {
         if (currentFontFace == nullptr)
         {
-            auto* typeface = dynamic_cast<WindowsDirectWriteTypeface*> (font.getTypeface());
-            if (typeface)
+            auto typeface = font.getTypefacePtr();
+            auto directWriteTypeface = dynamic_cast<WindowsDirectWriteTypeface*> (typeface.get());
+            if (directWriteTypeface)
             {
-                currentFontFace = typeface->getIDWriteFontFace();
-                fontHeightToEmSizeFactor = typeface->getUnitsToHeightScaleFactor();
+                currentFontFace = directWriteTypeface->getIDWriteFontFace();
+                fontHeightToEmSizeFactor = directWriteTypeface->getUnitsToHeightScaleFactor();
             }
         }
     }
