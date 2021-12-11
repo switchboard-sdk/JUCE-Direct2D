@@ -142,7 +142,12 @@ static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* s
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
-        hwnd(hwnd_)
+        hwnd(hwnd_),
+        childWindow(hwnd_)
+    {
+    }
+
+    ~Pimpl()
     {
     }
 
@@ -220,190 +225,36 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return nullptr;
     }
 
-    void createDeviceContext()
-    {
-        if (factories->d2dFactory != nullptr)
-        {
-            if (renderingTarget == nullptr)
-            {
-                // This flag adds support for surfaces with a different color channel ordering
-                // than the API default. It is required for compatibility with Direct2D.
-                UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if JUCE_DEBUG
-                creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
-
-                ComSmartPtr<ID3D11Device> direct3DDevice;
-                auto hr = D3D11CreateDevice(nullptr,
-                    D3D_DRIVER_TYPE_HARDWARE,
-                    nullptr,
-                    creationFlags,
-                    nullptr, 0,
-                    D3D11_SDK_VERSION,
-                    direct3DDevice.resetAndGetPointerAddress(),
-                    nullptr,
-                    nullptr);
-                if (SUCCEEDED(hr))
-                {
-                    ComSmartPtr<IDXGIDevice> dxgiDevice;
-                    hr = direct3DDevice->QueryInterface(dxgiDevice.resetAndGetPointerAddress());
-                    if (SUCCEEDED(hr))
-                    {
-                        ComSmartPtr<IDXGIAdapter> dxgiAdapter;
-                        hr = dxgiDevice->GetAdapter(dxgiAdapter.resetAndGetPointerAddress());
-                        if (SUCCEEDED(hr))
-                        {
-                            ComSmartPtr<IDXGIFactory2> dxgiFactory;
-                            hr = dxgiAdapter->GetParent(__uuidof(dxgiFactory), reinterpret_cast<void**>(dxgiFactory.resetAndGetPointerAddress()));
-                            if (SUCCEEDED(hr))
-                            {
-                                DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
-                                swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                                swapChainDescription.SampleDesc.Count = 1;
-                                swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-                                swapChainDescription.BufferCount = 1;
-                                swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-                                hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
-                                    hwnd,
-                                    &swapChainDescription,
-                                    nullptr,
-                                    nullptr,
-                                    swapChain.resetAndGetPointerAddress());
-                                if (SUCCEEDED(hr))
-                                {
-                                    ComSmartPtr<ID2D1Device> direct2DDevice;
-                                    hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
-                                    if (SUCCEEDED(hr))
-                                    {
-                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, renderingTarget.resetAndGetPointerAddress());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                jassert(SUCCEEDED(hr));
-            }
-
-            if (colourBrush == nullptr && renderingTarget != nullptr)
-            {
-                auto hr = renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
-                jassert(SUCCEEDED(hr));
-            }
-        }
-    }
-
-    void releaseDeviceContext()
-    {
-        colourBrush = nullptr;
-        swapChainBuffer = nullptr;
-        swapChain = nullptr;
-        renderingTarget = nullptr;
-    }
-
-    void createSwapChainBuffer()
-    {
-        if (renderingTarget != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
-        {
-            ComSmartPtr<IDXGISurface> surface;
-            auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
-            if (SUCCEEDED(hr))
-            {
-                D2D1_BITMAP_PROPERTIES1 bitmapProperties = {};
-                bitmapProperties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
-                bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-                hr = renderingTarget->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
-                jassert(SUCCEEDED(hr));
-#if 0 // xxx how to handle DPI scaling for Windows 8?
-                if (SUCCEEDED(hr))
-                {
-                    UINT GetDpiForWindow(HWND hwnd);
-                    auto dpi = GetDpiForWindow(hwnd);
-                    renderingTarget->SetDpi((float)dpi, (float)dpi);
-                }
-#endif
-            }
-        }
-    }
-
     ID2D1DeviceContext* const getRenderingTarget() const 
     {
-        return renderingTarget;
+        return childWindow.getRenderingTarget();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return colourBrush;
+        return childWindow.getColourBrush();
     }
 
     void resized()
     {
-        if (renderingTarget != nullptr)
-        {
-            renderingTarget->SetTarget(nullptr); // xxx this may be redundant
-        }
-
-        if (swapChain != nullptr)
-        {
-            swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
-
-            RECT windowRect;
-            GetClientRect(hwnd, &windowRect);
-            auto width = windowRect.right - windowRect.left;
-            auto height = windowRect.bottom - windowRect.top;
-
-            auto hr = swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
-            if (SUCCEEDED(hr))
-            {
-                createSwapChainBuffer();
-            }
-            else
-            {
-                releaseDeviceContext();
-            }
-        }
+        childWindow.resized();
     }
 
     void startRender()
     {
-        createDeviceContext();
-        if (renderingTarget != nullptr)
-        {
-            createSwapChainBuffer();
-            if (swapChainBuffer != nullptr)
-            {
-                renderingTarget->SetTarget(swapChainBuffer);
-                renderingTarget->BeginDraw();
-            }
-        }
+        childWindow.startRender();
     }
 
     void finishRender()
     {
-        if (renderingTarget != nullptr && swapChain != nullptr)
-        {
-            auto hr = renderingTarget->EndDraw();
-            if (SUCCEEDED(hr))
-            {
-                hr = swapChain->Present(1, D2D1_PRESENT_OPTIONS_NONE);
-            }
-
-            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
-            {
-                releaseDeviceContext();
-            }
-        }
+        childWindow.finishRender();
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
 
 private:
     HWND hwnd = nullptr;
-    ComSmartPtr<ID2D1DeviceContext> renderingTarget;
-    ComSmartPtr<IDXGISwapChain1> swapChain;
-    ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
-    ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
+    Direct2DChildWindow childWindow;
 };
 
 //==============================================================================
