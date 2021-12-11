@@ -143,11 +143,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
         hwnd(hwnd_),
-        childWindow(hwnd_)
-    {
-    }
-
-    ~Pimpl()
+        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE)
     {
     }
 
@@ -254,6 +250,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
+    Direct2DChildWindow::Class childWindowClass;
     Direct2DChildWindow childWindow;
 };
 
