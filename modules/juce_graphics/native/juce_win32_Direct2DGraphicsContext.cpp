@@ -143,8 +143,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
         hwnd(hwnd_),
-        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE),
-        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH)
+        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE)
     {
     }
 
@@ -234,22 +233,27 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     void startResizing()
     {
-        bltModeChildWindow.setVisible(true);
+        bltModeChildWindow = std::make_unique<Direct2DChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
+        activeChildWindow = bltModeChildWindow.get();
+
         flipModeChildWindow.setVisible(false);
-        activeChildWindow = &bltModeChildWindow;
     }
 
     void resized()
     {
-        bltModeChildWindow.resized();
+        if (bltModeChildWindow)
+        {
+            bltModeChildWindow->resized();
+        }
     }
 
     void finishResizing()
     {
         flipModeChildWindow.resized();
         flipModeChildWindow.setVisible(true);
-        bltModeChildWindow.setVisible(false);
         activeChildWindow = &flipModeChildWindow;
+
+        bltModeChildWindow = nullptr;
     }
 
     void startRender()
@@ -268,7 +272,7 @@ private:
     HWND hwnd = nullptr;
     Direct2DChildWindow::Class childWindowClass;
     Direct2DChildWindow flipModeChildWindow;
-    Direct2DChildWindow bltModeChildWindow;
+    std::unique_ptr<Direct2DChildWindow> bltModeChildWindow;
     Direct2DChildWindow* activeChildWindow = &flipModeChildWindow;
 };
 
