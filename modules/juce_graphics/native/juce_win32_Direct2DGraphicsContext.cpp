@@ -143,11 +143,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
         hwnd(hwnd_),
-        childWindow(hwnd_)
-    {
-    }
-
-    ~Pimpl()
+        renderTarget(hwnd_)
     {
     }
 
@@ -225,36 +221,36 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return nullptr;
     }
 
-    ID2D1DeviceContext* const getRenderingTarget() const 
+    ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return childWindow.getRenderingTarget();
+        return renderTarget.getDeviceContext();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return childWindow.getColourBrush();
+        return renderTarget.getColourBrush();
     }
 
     void resized()
     {
-        childWindow.resized();
+        renderTarget.resized();
     }
 
     void startRender()
     {
-        childWindow.startRender();
+        renderTarget.startRender();
     }
 
     void finishRender()
     {
-        childWindow.finishRender();
+        renderTarget.finishRender();
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
 
 private:
     HWND hwnd = nullptr;
-    Direct2DChildWindow childWindow;
+    Direct2DChildWindow renderTarget;
 };
 
 //==============================================================================
@@ -278,9 +274,9 @@ public:
         }
         else
         {
-            if (auto renderingTarget = owner.pimpl->getRenderingTarget())
+            if (auto deviceContext = owner.pimpl->getDeviceContext())
             {
-                const auto size = renderingTarget->GetPixelSize();
+                const auto size = deviceContext->GetPixelSize();
                 clipRegion.setSize(size.width, size.height);
             }
             setFill(FillType(Colours::black));
@@ -296,7 +292,7 @@ public:
 
     void pushLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
-        if (auto renderingTarget = owner.pimpl->getRenderingTarget())
+        if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
 	        //
 	        // Clipping and transparency are all handled by pushing Direct2D layers. The SavedState creates an internal stack
@@ -304,9 +300,9 @@ public:
 	        // 
 	        // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
 	        //
-	        renderingTarget->PushLayer(layerParameters, nullptr);
+	        deviceContext->PushLayer(layerParameters, nullptr);
 	
-	        pushedLayers.add(new Layer{ renderingTarget });
+	        pushedLayers.add(new Layer{ deviceContext });
         }
     }
 
@@ -320,11 +316,11 @@ public:
 
     void pushAxisAlignedClipLayer(Rectangle<int> r)
     {
-        if (auto renderingTarget = owner.pimpl->getRenderingTarget())
+        if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
-            renderingTarget->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            deviceContext->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-            pushedLayers.add(new AxisAlignedClipLayer{ renderingTarget });
+            pushedLayers.add(new AxisAlignedClipLayer{ deviceContext });
         }
     }
 
@@ -397,8 +393,8 @@ public:
 
     void createBrush()
     {
-        auto renderingTarget = owner.pimpl->getRenderingTarget();
-        if (currentBrush == nullptr && renderingTarget != nullptr)
+        auto deviceContext = owner.pimpl->getDeviceContext();
+        if (currentBrush == nullptr && deviceContext != nullptr)
         {
             if (fillType.isColour())
             {
@@ -418,15 +414,15 @@ public:
 
                 image = image.convertedToFormat (Image::ARGB);
                 Image::BitmapData bd (image, Image::BitmapData::readOnly);
-                bp.pixelFormat = renderingTarget->GetPixelFormat();
+                bp.pixelFormat = deviceContext->GetPixelFormat();
                 bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
                 ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
-                auto hr = renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
+                auto hr = deviceContext->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
                 jassert(SUCCEEDED(hr));
                 if (SUCCEEDED(hr))
                 {
-                    hr = renderingTarget->CreateBitmapBrush(tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
+                    hr = deviceContext->CreateBitmapBrush(tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
                     jassert(SUCCEEDED(hr));
                     if (SUCCEEDED(hr))
                     {
@@ -448,7 +444,7 @@ public:
                     stops[i].position = (FLOAT) fillType.gradient->getColourPosition (i);
                 }
 
-                renderingTarget->CreateGradientStopCollection (stops.getData(), numColors, gradientStops.resetAndGetPointerAddress());
+                deviceContext->CreateGradientStopCollection (stops.getData(), numColors, gradientStops.resetAndGetPointerAddress());
 
                 if (fillType.gradient->isRadial)
                 {
@@ -457,7 +453,7 @@ public:
                     const auto r = p1.getDistanceFrom(p2);
                     const auto props = D2D1::RadialGradientBrushProperties ({ p1.x, p1.y }, {}, r, r);
 
-                    renderingTarget->CreateRadialGradientBrush (props, brushProps, gradientStops, radialGradient.resetAndGetPointerAddress());
+                    deviceContext->CreateRadialGradientBrush (props, brushProps, gradientStops, radialGradient.resetAndGetPointerAddress());
                     currentBrush = radialGradient;
                 }
                 else
@@ -466,7 +462,7 @@ public:
                     const auto p2 = fillType.gradient->point2;
                     const auto props = D2D1::LinearGradientBrushProperties ({ p1.x, p1.y }, { p2.x, p2.y });
 
-                    renderingTarget->CreateLinearGradientBrush (props, brushProps, gradientStops, linearGradient.resetAndGetPointerAddress());
+                    deviceContext->CreateLinearGradientBrush (props, brushProps, gradientStops, linearGradient.resetAndGetPointerAddress());
 
                     currentBrush = linearGradient;
                 }
@@ -499,34 +495,34 @@ public:
     //
     struct Layer
     {
-        Layer(ID2D1DeviceContext* renderingTarget_) :
-            renderingTarget(renderingTarget_)
+        Layer(ID2D1DeviceContext* deviceContext_) :
+            deviceContext(deviceContext_)
         {
-            jassert(renderingTarget_ != nullptr);
+            jassert(deviceContext_ != nullptr);
         }
         virtual ~Layer() = default;
 
         virtual void pop()
         {
-            renderingTarget->PopLayer();
+            deviceContext->PopLayer();
         }
 
-        ID2D1DeviceContext* renderingTarget;
+        ID2D1DeviceContext* deviceContext;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Layer)
     };
 
     struct AxisAlignedClipLayer : public Layer
     {
-        AxisAlignedClipLayer(ID2D1DeviceContext* renderingTarget_) :
-            Layer(renderingTarget_)
+        AxisAlignedClipLayer(ID2D1DeviceContext* deviceContext_) :
+            Layer(deviceContext_)
         {
         }
         ~AxisAlignedClipLayer() override = default;
 
         virtual void pop()
         {
-            renderingTarget->PopAxisAlignedClip();
+            deviceContext->PopAxisAlignedClip();
         }
     };
 
@@ -652,10 +648,10 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
     // 
     // Have to use addWithoutMerging to build the rectangle list to keep the rectangles separate.
     //
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
         RectangleList<int> rectangles{ r };
-        auto size = renderingTarget->GetPixelSize();
+        auto size = deviceContext->GetPixelSize();
         rectangles.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
 
         currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_ALTERNATE));
@@ -669,7 +665,7 @@ void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const Affine
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
         auto chainedTransform = currentState->currentTransform.getTransformWith(transform);
         auto transformedR = sourceImage.getBounds().transformedBy(chainedTransform);
@@ -685,11 +681,11 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
         auto bp = D2D1::BitmapProperties();
 
         Image::BitmapData bd{ maskImage, Image::BitmapData::readOnly };
-        bp.pixelFormat = renderingTarget->GetPixelFormat();
+        bp.pixelFormat = deviceContext->GetPixelFormat();
         bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
-        auto hr = renderingTarget->CreateBitmap(D2D1_SIZE_U{ (UINT32)maskImage.getWidth(), (UINT32)maskImage.getHeight() }, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
-        hr = renderingTarget->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
+        auto hr = deviceContext->CreateBitmap(D2D1_SIZE_U{ (UINT32)maskImage.getWidth(), (UINT32)maskImage.getHeight() }, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
+        hr = deviceContext->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
 
         auto layerParams = D2D1::LayerParameters();
         layerParams.opacityBrush = brush;
@@ -770,12 +766,12 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
-        renderingTarget->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
-        renderingTarget->FillRectangle(rectangleToRectF(r), currentState->currentBrush);
-        renderingTarget->SetTransform(D2D1::IdentityMatrix());
+        deviceContext->FillRectangle(rectangleToRectF(r), currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
 
@@ -787,54 +783,54 @@ void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& 
 
 void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTransform& transform)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
         ComSmartPtr<ID2D1Geometry> geometry(pimpl->pathToPathGeometry(p, currentState->currentTransform.getTransformWith(transform)));
 
         if (geometry != nullptr)
         {
-            renderingTarget->FillGeometry(geometry, currentState->currentBrush);
+            deviceContext->FillGeometry(geometry, currentState->currentBrush);
         }
     }
 }
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
-        renderingTarget->SetTransform(transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
+        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
 
         D2D1_SIZE_U size = { (UINT32)image.getWidth(), (UINT32)image.getHeight() };
         auto bp = D2D1::BitmapProperties();
 
         Image img(image.convertedToFormat(Image::ARGB));
         Image::BitmapData bd(img, Image::BitmapData::readOnly);
-        bp.pixelFormat = renderingTarget->GetPixelFormat();
+        bp.pixelFormat = deviceContext->GetPixelFormat();
         bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
         {
             ComSmartPtr<ID2D1Bitmap> tempBitmap;
-            renderingTarget->CreateBitmap(size, bd.data, bd.lineStride, bp, tempBitmap.resetAndGetPointerAddress());
+            deviceContext->CreateBitmap(size, bd.data, bd.lineStride, bp, tempBitmap.resetAndGetPointerAddress());
             if (tempBitmap != nullptr)
-                renderingTarget->DrawBitmap(tempBitmap);
+                deviceContext->DrawBitmap(tempBitmap);
         }
 
-        renderingTarget->SetTransform(D2D1::IdentityMatrix());
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
 
 void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
-        renderingTarget->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
 
-        renderingTarget->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
+        deviceContext->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
             D2D1::Point2F(line.getEndX(), line.getEndY()),
             currentState->currentBrush);
-        renderingTarget->SetTransform(D2D1::IdentityMatrix());
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
 
@@ -855,12 +851,12 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
 
     jassert(currentState->currentFontFace);
 
-    auto renderingTarget = pimpl->getRenderingTarget();
-    if (currentState->currentFontFace != nullptr && renderingTarget != nullptr)
+    auto deviceContext = pimpl->getDeviceContext();
+    if (currentState->currentFontFace != nullptr && deviceContext != nullptr)
     {
         auto hScale = currentState->font.getHorizontalScale();
 
-        renderingTarget->SetTransform(transformToMatrix(AffineTransform::scale(hScale, 1.0f)
+        deviceContext->SetTransform(transformToMatrix(AffineTransform::scale(hScale, 1.0f)
             .followedBy(transform)
             .followedBy(currentState->currentTransform.getTransform())));
 
@@ -878,23 +874,23 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
         glyphRun.isSideways = FALSE;
         glyphRun.bidiLevel = 0;
 
-        renderingTarget->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
-        renderingTarget->SetTransform(D2D1::IdentityMatrix());
+        deviceContext->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
 
 bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& text, const Rectangle<float>& area)
 {
-    if (auto renderingTarget = pimpl->getRenderingTarget())
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
-        renderingTarget->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
 
         DirectWriteTypeLayout::drawToD2DContext(text, area,
-            *(renderingTarget),
+            *(deviceContext),
             *(pimpl->factories->directWriteFactory),
             *(pimpl->factories->systemFonts));
 
-        renderingTarget->SetTransform(D2D1::IdentityMatrix());
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 
     return true;

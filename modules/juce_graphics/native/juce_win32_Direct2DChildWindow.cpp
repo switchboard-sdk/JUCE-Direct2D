@@ -54,7 +54,7 @@ namespace juce
         {
             if (factories->d2dFactory != nullptr)
             {
-                if (renderingTarget == nullptr)
+                if (deviceContext == nullptr)
                 {
                     // This flag adds support for surfaces with a different color channel ordering
                     // than the API default. It is required for compatibility with Direct2D.
@@ -106,7 +106,7 @@ namespace juce
                                         hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                         if (SUCCEEDED(hr))
                                         {
-                                            hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, renderingTarget.resetAndGetPointerAddress());
+                                            hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext.resetAndGetPointerAddress());
                                         }
                                     }
                                 }
@@ -116,9 +116,9 @@ namespace juce
                     jassert(SUCCEEDED(hr));
                 }
 
-                if (colourBrush == nullptr && renderingTarget != nullptr)
+                if (colourBrush == nullptr && deviceContext != nullptr)
                 {
-                    auto hr = renderingTarget->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
+                    auto hr = deviceContext->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
                     jassert(SUCCEEDED(hr));
                 }
             }
@@ -129,12 +129,12 @@ namespace juce
             colourBrush = nullptr;
             swapChainBuffer = nullptr;
             swapChain = nullptr;
-            renderingTarget = nullptr;
+            deviceContext = nullptr;
         }
 
         void createSwapChainBuffer()
         {
-            if (renderingTarget != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
+            if (deviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
             {
                 ComSmartPtr<IDXGISurface> surface;
                 auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
@@ -144,7 +144,7 @@ namespace juce
                     bitmapProperties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
                     bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
                     bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-                    hr = renderingTarget->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
+                    hr = deviceContext->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
                     jassert(SUCCEEDED(hr));
 #if 0 // xxx how to handle DPI scaling for Windows 8?
                     if (SUCCEEDED(hr))
@@ -171,9 +171,9 @@ namespace juce
             //
             // Resize the swap chain 
             //
-            if (renderingTarget != nullptr)
+            if (deviceContext != nullptr)
             {
-                renderingTarget->SetTarget(nullptr); // xxx this may be redundant
+                deviceContext->SetTarget(nullptr); // xxx this may be redundant
             }
 
             if (swapChain != nullptr)
@@ -200,22 +200,22 @@ namespace juce
         void startRender()
         {
             createDeviceContext();
-            if (renderingTarget != nullptr)
+            if (deviceContext != nullptr)
             {
                 createSwapChainBuffer();
                 if (swapChainBuffer != nullptr)
                 {
-                    renderingTarget->SetTarget(swapChainBuffer);
-                    renderingTarget->BeginDraw();
+                    deviceContext->SetTarget(swapChainBuffer);
+                    deviceContext->BeginDraw();
                 }
             }
         }
 
         void finishRender()
         {
-            if (renderingTarget != nullptr && swapChain != nullptr)
+            if (deviceContext != nullptr && swapChain != nullptr)
             {
-                auto hr = renderingTarget->EndDraw();
+                auto hr = deviceContext->EndDraw();
                 if (SUCCEEDED(hr))
                 {
                     hr = swapChain->Present(1, D2D1_PRESENT_OPTIONS_NONE);
@@ -228,9 +228,9 @@ namespace juce
             }
         }
 
-        ID2D1DeviceContext* const getRenderingTarget() const
+        ID2D1DeviceContext* const getDeviceContext() const
         {
-            return renderingTarget;
+            return deviceContext;
         }
 
         ID2D1SolidColorBrush* const getColourBrush() const
@@ -248,7 +248,7 @@ namespace juce
         HWND const parentHwnd;
         HWND hwnd = nullptr;
         SharedResourcePointer<Direct2DFactories> factories;
-        ComSmartPtr<ID2D1DeviceContext> renderingTarget;
+        ComSmartPtr<ID2D1DeviceContext> deviceContext;
         ComSmartPtr<IDXGISwapChain1> swapChain;
         ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
         ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
@@ -261,25 +261,17 @@ namespace juce
             LPARAM lParam
         )
         {
-            if (message == WM_CREATE)
+            switch (message)
             {
-                auto pcs = (LPCREATESTRUCT)lParam;
-                auto that = (Direct2DChildWindow*)pcs->lpCreateParams;
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(that));
+            case WM_CREATE:
+                return 0;
+
+            case WM_ERASEBKGND:
                 return 1;
-            }
 
-            if (auto that = reinterpret_cast<Direct2DChildWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)))
-            {
-                switch (message)
-                {
-                case WM_ERASEBKGND:
-                    return 1;
-
-                case WM_PAINT:
-                    //that->onRender();
-                    return 0;
-                }
+            case WM_PAINT:
+                ValidateRect(hwnd, nullptr);
+                return 0;
             }
 
             return DefWindowProcW(hwnd, message, wParam, lParam);
