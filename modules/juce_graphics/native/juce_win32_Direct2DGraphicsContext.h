@@ -77,7 +77,9 @@ public:
     void drawGlyph (int glyphNumber, const AffineTransform&) override;
     bool drawTextLayout (const AttributedString&, const Rectangle<float>&) override;
 
+    void startResizing();
     void resized();
+    void finishResizing();
 
     void start();
     void end();

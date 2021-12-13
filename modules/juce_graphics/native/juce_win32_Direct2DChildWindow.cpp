@@ -4,29 +4,20 @@ namespace juce
     class Direct2DChildWindow
     {
     public:
-        Direct2DChildWindow(HWND parentHwnd_) :
-            parentHwnd(parentHwnd_)
+        Direct2DChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING scaling_) :
+            parentHwnd(parentHwnd_),
+            swapEffect(swapEffect_),
+            bufferCount(bufferCount_),
+            scaling(scaling_)
         {
             HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
-
-            WNDCLASSEXW wcex = { sizeof(WNDCLASSEX) };
-            wcex.style = CS_HREDRAW | CS_VREDRAW;
-            wcex.lpfnWndProc = windowProc;
-            wcex.cbClsExtra = 0;
-            wcex.cbWndExtra = sizeof(LONG_PTR);
-            wcex.hInstance = moduleHandle;
-            wcex.hbrBackground = nullptr;
-            wcex.lpszMenuName = nullptr;
-            wcex.lpszClassName = className.toWideCharPointer();
-            RegisterClassExW(&wcex);
 
             RECT parentRect;
             GetClientRect(parentHwnd_, &parentRect);
 
-            // Create the window.
-            hwnd = CreateWindowW(className.toWideCharPointer(),
+            hwnd = CreateWindowW(className_.toWideCharPointer(),
                 nullptr,
-                WS_CHILD | WS_DISABLED,
+                WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 parentRect.right - parentRect.left,
@@ -44,10 +35,7 @@ namespace juce
 
         ~Direct2DChildWindow()
         {
-            HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
-
             DestroyWindow(hwnd);
-            UnregisterClass(className.toWideCharPointer(), moduleHandle);
         }
 
         void createDeviceContext()
@@ -91,9 +79,9 @@ namespace juce
                                     swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
                                     swapChainDescription.SampleDesc.Count = 1;
                                     swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-                                    swapChainDescription.BufferCount = 1;
-                                    swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-                                    swapChainDescription.Scaling = DXGI_SCALING_STRETCH;
+                                    swapChainDescription.BufferCount = bufferCount;
+                                    swapChainDescription.SwapEffect = swapEffect;
+                                    swapChainDescription.Scaling = scaling;
                                     hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                         hwnd,
                                         &swapChainDescription,
@@ -243,9 +231,37 @@ namespace juce
             ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
         }
 
+        struct Class
+        {
+            Class()
+            {
+                HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
+                WNDCLASSEXW wcex = { sizeof(WNDCLASSEX) };
+                wcex.style = CS_HREDRAW | CS_VREDRAW;
+                wcex.lpfnWndProc = windowProc;
+                wcex.cbClsExtra = 0;
+                wcex.cbWndExtra = sizeof(LONG_PTR);
+                wcex.hInstance = moduleHandle;
+                wcex.hbrBackground = nullptr;
+                wcex.lpszMenuName = nullptr;
+                wcex.lpszClassName = className.toWideCharPointer();
+                RegisterClassExW(&wcex);
+            }
+
+            ~Class()
+            {
+                HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
+                UnregisterClassW(className.toWideCharPointer(), moduleHandle);
+            }
+
+            String const className{ "JUCE_Direct2D_" + String::toHexString(Time::getHighResolutionTicks()) };
+        };
+
     private:
-        String const className{ "JUCE_Direct2D_" + String::toHexString(Time::getHighResolutionTicks()) };
         HWND const parentHwnd;
+        DXGI_SWAP_EFFECT const swapEffect;
+        UINT const bufferCount;
+        DXGI_SCALING const scaling;
         HWND hwnd = nullptr;
         SharedResourcePointer<Direct2DFactories> factories;
         ComSmartPtr<ID2D1DeviceContext> deviceContext;

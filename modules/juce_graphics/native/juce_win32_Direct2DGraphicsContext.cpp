@@ -143,7 +143,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
         hwnd(hwnd_),
-        renderTarget(hwnd_)
+        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE)
     {
     }
 
@@ -223,34 +223,57 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return renderTarget.getDeviceContext();
+        return activeChildWindow->getDeviceContext();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return renderTarget.getColourBrush();
+        return activeChildWindow->getColourBrush();
+    }
+
+    void startResizing()
+    {
+        bltModeChildWindow = std::make_unique<Direct2DChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
+        activeChildWindow = bltModeChildWindow.get();
+
+        flipModeChildWindow.setVisible(false);
     }
 
     void resized()
     {
-        renderTarget.resized();
+        if (bltModeChildWindow)
+        {
+            bltModeChildWindow->resized();
+        }
+    }
+
+    void finishResizing()
+    {
+        flipModeChildWindow.resized();
+        flipModeChildWindow.setVisible(true);
+        activeChildWindow = &flipModeChildWindow;
+
+        bltModeChildWindow = nullptr;
     }
 
     void startRender()
     {
-        renderTarget.startRender();
+        activeChildWindow->startRender();
     }
 
     void finishRender()
     {
-        renderTarget.finishRender();
+        activeChildWindow->finishRender();
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
 
 private:
     HWND hwnd = nullptr;
-    Direct2DChildWindow renderTarget;
+    Direct2DChildWindow::Class childWindowClass;
+    Direct2DChildWindow flipModeChildWindow;
+    std::unique_ptr<Direct2DChildWindow> bltModeChildWindow;
+    Direct2DChildWindow* activeChildWindow = &flipModeChildWindow;
 };
 
 //==============================================================================
@@ -562,9 +585,19 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
     states.clear();
 }
 
+void Direct2DLowLevelGraphicsContext::startResizing()
+{
+    pimpl->startResizing();
+}
+
 void Direct2DLowLevelGraphicsContext::resized()
 {
     pimpl->resized();
+}
+
+void Direct2DLowLevelGraphicsContext::finishResizing()
+{
+    pimpl->finishResizing();
 }
 
 void Direct2DLowLevelGraphicsContext::start()

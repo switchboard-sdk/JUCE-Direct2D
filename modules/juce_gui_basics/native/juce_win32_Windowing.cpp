@@ -3671,7 +3671,24 @@ private:
 
                 break;
 
+            
             //==============================================================================
+#if JUCE_DIRECT2D
+            case WM_ENTERSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->startResizing();
+                }
+                break;
+            
+            case WM_EXITSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->finishResizing();
+                }
+                break; 
+#endif
+
             case WM_PAINT:
                 handlePaintMessage();
                 return 0;
