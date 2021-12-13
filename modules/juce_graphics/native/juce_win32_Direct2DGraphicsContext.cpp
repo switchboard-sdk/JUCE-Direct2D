@@ -26,119 +26,124 @@
 namespace juce
 {
 
-template <typename Type>
-D2D1_RECT_F rectangleToRectF (const Rectangle<Type>& r)
-{
-    return { (float) r.getX(), (float) r.getY(), (float) r.getRight(), (float) r.getBottom() };
-}
-
-static D2D1_COLOR_F colourToD2D (Colour c)
-{
-    return { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha() };
-}
-
-static bool isTransformOnlyTranslationOrScale(AffineTransform const& transform)
-{
-    return approximatelyEqual(transform.mat01, 0.0f) && approximatelyEqual(transform.mat10, 0.0f);
-}
-
-static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
-{
-    //
-    // Every call to BeginFigure must have a matching call to EndFigure. But - the Path does not necessarily
-    // have matching startNewSubPath and closePath markers. The figureStarted flag indicates if an extra call
-    // to BeginFigure or EndFigure is needed during the iteration loop or when exiting this function.
-    //
-    Path::Iterator it (path);
-    bool figureStarted = false;
-
-    while (it.next())
+    namespace Direct2D
     {
-        switch (it.elementType)
+        template <typename Type>
+        D2D1_RECT_F rectangleToRectF(const Rectangle<Type>& r)
         {
-        case Path::Iterator::cubicTo:
-        {
-            jassert(figureStarted);
-
-            transform.transformPoint (it.x1, it.y1);
-            transform.transformPoint (it.x2, it.y2);
-            transform.transformPoint (it.x3, it.y3);
-
-            sink->AddBezier ({ { it.x1, it.y1 }, { it.x2, it.y2 }, { it.x3, it.y3 } });
-            break;
+            return { (float)r.getX(), (float)r.getY(), (float)r.getRight(), (float)r.getBottom() };
         }
 
-        case Path::Iterator::lineTo:
+        static D2D1_COLOR_F colourToD2D(Colour c)
         {
-            jassert(figureStarted);
-
-            transform.transformPoint (it.x1, it.y1);
-            sink->AddLine ({ it.x1, it.y1 });
-            break;
+            return { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha() };
         }
 
-        case Path::Iterator::quadraticTo:
+        static bool isTransformOnlyTranslationOrScale(AffineTransform const& transform)
         {
-            jassert(figureStarted);
-
-            transform.transformPoint (it.x1, it.y1);
-            transform.transformPoint (it.x2, it.y2);
-            sink->AddQuadraticBezier ({ { it.x1, it.y1 }, { it.x2, it.y2 } });
-            break;
+            return approximatelyEqual(transform.mat01, 0.0f) && approximatelyEqual(transform.mat10, 0.0f);
         }
 
-        case Path::Iterator::closePath:
+        static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
         {
-            if (figureStarted)
+            //
+            // Every call to BeginFigure must have a matching call to EndFigure. But - the Path does not necessarily
+            // have matching startNewSubPath and closePath markers. The figureStarted flag indicates if an extra call
+            // to BeginFigure or EndFigure is needed during the iteration loop or when exiting this function.
+            //
+            Path::Iterator it(path);
+            bool figureStarted = false;
+
+            while (it.next())
             {
-	            sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-	            figureStarted = false;
-            }
-            break;
-        }
+                switch (it.elementType)
+                {
+                case Path::Iterator::cubicTo:
+                {
+                    jassert(figureStarted);
 
-        case Path::Iterator::startNewSubPath:
-        {
+                    transform.transformPoint(it.x1, it.y1);
+                    transform.transformPoint(it.x2, it.y2);
+                    transform.transformPoint(it.x3, it.y3);
+
+                    sink->AddBezier({ { it.x1, it.y1 }, { it.x2, it.y2 }, { it.x3, it.y3 } });
+                    break;
+                }
+
+                case Path::Iterator::lineTo:
+                {
+                    jassert(figureStarted);
+
+                    transform.transformPoint(it.x1, it.y1);
+                    sink->AddLine({ it.x1, it.y1 });
+                    break;
+                }
+
+                case Path::Iterator::quadraticTo:
+                {
+                    jassert(figureStarted);
+
+                    transform.transformPoint(it.x1, it.y1);
+                    transform.transformPoint(it.x2, it.y2);
+                    sink->AddQuadraticBezier({ { it.x1, it.y1 }, { it.x2, it.y2 } });
+                    break;
+                }
+
+                case Path::Iterator::closePath:
+                {
+                    if (figureStarted)
+                    {
+                        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                        figureStarted = false;
+                    }
+                    break;
+                }
+
+                case Path::Iterator::startNewSubPath:
+                {
+                    if (figureStarted)
+                    {
+                        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                    }
+
+                    transform.transformPoint(it.x1, it.y1);
+                    sink->BeginFigure({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
+                    figureStarted = true;
+                    break;
+                }
+                }
+            }
+
             if (figureStarted)
             {
                 sink->EndFigure(D2D1_FIGURE_END_CLOSED);
             }
-
-            transform.transformPoint (it.x1, it.y1);
-            sink->BeginFigure ({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
-            figureStarted = true;
-            break;
         }
+
+        static D2D1::Matrix3x2F transformToMatrix(const AffineTransform& transform)
+        {
+            return { transform.mat00, transform.mat10, transform.mat01, transform.mat11, transform.mat02, transform.mat12 };
         }
-    }
 
-    if (figureStarted)
-    {
-        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    }
-}
+        static D2D1_POINT_2F pointTransformed(int x, int y, const AffineTransform& transform)
+        {
+            transform.transformPoint(x, y);
+            return { (FLOAT)x, (FLOAT)y };
+        }
 
-static D2D1::Matrix3x2F transformToMatrix (const AffineTransform& transform)
-{
-    return { transform.mat00, transform.mat10, transform.mat01, transform.mat11, transform.mat02, transform.mat12 };
-}
+        static void rectToGeometrySink(const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform)
+        {
+            sink->BeginFigure(pointTransformed(rect.getX(), rect.getY(), transform), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(pointTransformed(rect.getRight(), rect.getY(), transform));
+            sink->AddLine(pointTransformed(rect.getRight(), rect.getBottom(), transform));
+            sink->AddLine(pointTransformed(rect.getX(), rect.getBottom(), transform));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
 
-static D2D1_POINT_2F pointTransformed (int x, int y, const AffineTransform& transform)
-{
-    transform.transformPoint (x, y);
-    return { (FLOAT) x, (FLOAT) y };
-}
-
-static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform)
-{
-    sink->BeginFigure (pointTransformed (rect.getX(),     rect.getY(),       transform), D2D1_FIGURE_BEGIN_FILLED);
-    sink->AddLine     (pointTransformed (rect.getRight(), rect.getY(),       transform));
-    sink->AddLine     (pointTransformed (rect.getRight(), rect.getBottom(),  transform));
-    sink->AddLine     (pointTransformed (rect.getX(),     rect.getBottom(),  transform));
-    sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-}
+    } // namespace Direct2D
 
 //==============================================================================
+
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
@@ -185,7 +190,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         if (objects.sink != nullptr)
         {
-            rectToGeometrySink(rect, objects.sink, transform);
+            Direct2D::rectToGeometrySink(rect, objects.sink, transform);
             return { (ID2D1Geometry*)objects.geometry };
         }
 
@@ -199,7 +204,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         if (objects.sink != nullptr)
         {
             for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-                rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+                Direct2D::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
 
             return { (ID2D1Geometry*)objects.geometry };
         }
@@ -213,7 +218,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         if (objects.sink != nullptr)
         {
-            pathToGeometrySink(path, objects.sink, transform);
+            Direct2D::pathToGeometrySink(path, objects.sink, transform);
 
             return { (ID2D1Geometry*)objects.geometry };
         }
@@ -233,7 +238,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     void startResizing()
     {
-        bltModeChildWindow = std::make_unique<Direct2DChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
+        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
         activeChildWindow = bltModeChildWindow.get();
 
         // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
@@ -274,10 +279,10 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
-    Direct2DChildWindow::Class childWindowClass;
-    Direct2DChildWindow flipModeChildWindow;
-    std::unique_ptr<Direct2DChildWindow> bltModeChildWindow;
-    Direct2DChildWindow* activeChildWindow = &flipModeChildWindow;
+    Direct2D::ChildWindow::Class childWindowClass;
+    Direct2D::ChildWindow flipModeChildWindow;
+    std::unique_ptr<Direct2D::ChildWindow> bltModeChildWindow;
+    Direct2D::ChildWindow* activeChildWindow = &flipModeChildWindow;
 };
 
 //==============================================================================
@@ -345,7 +350,7 @@ public:
     {
         if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
-            deviceContext->PushAxisAlignedClip(rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            deviceContext->PushAxisAlignedClip(Direct2D::rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
             pushedLayers.add(new AxisAlignedClipLayer{ deviceContext });
         }
@@ -431,7 +436,7 @@ public:
             }
             else if (fillType.isTiledImage())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix (fillType.transform) };
                 auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
 
                 auto image = fillType.image;
@@ -459,7 +464,7 @@ public:
             }
             else if (fillType.isGradient())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (currentTransform.getTransformWith(fillType.transform)) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix (currentTransform.getTransformWith(fillType.transform)) };
 
                 const int numColors = fillType.gradient->getNumColours();
 
@@ -467,7 +472,7 @@ public:
 
                 for (int i = fillType.gradient->getNumColours(); --i >= 0;)
                 {
-                    stops[i].color = colourToD2D (fillType.gradient->getColour (i));
+                    stops[i].color = Direct2D::colourToD2D (fillType.gradient->getColour (i));
                     stops[i].position = (FLOAT) fillType.gradient->getColourPosition (i);
                 }
 
@@ -510,7 +515,7 @@ public:
     {
         if (auto colourBrush = owner.pimpl->getColourBrush())
         {
-            auto colour = colourToD2D(fillType.colour);
+            auto colour = Direct2D::colourToD2D(fillType.colour);
             colourBrush->SetColor(colour);
         }
     }
@@ -646,7 +651,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
     auto transformedR = r.transformedBy(currentTransform);
     transformedR.intersectRectangle(currentState->clipRegion);
 
-    if (isTransformOnlyTranslationOrScale(currentTransform))
+    if (Direct2D::isTransformOnlyTranslationOrScale(currentTransform))
     {
         //
         // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)
@@ -713,7 +718,7 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
         ComSmartPtr<ID2D1Bitmap> bitmap;
         ComSmartPtr<ID2D1BitmapBrush> brush;
 
-        D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix(chainedTransform) };
+        D2D1_BRUSH_PROPERTIES brushProps = { 1, Direct2D::transformToMatrix(chainedTransform) };
         auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
         auto bp = D2D1::BitmapProperties();
 
@@ -805,9 +810,9 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
-        deviceContext->FillRectangle(rectangleToRectF(r), currentState->currentBrush);
+        deviceContext->FillRectangle(Direct2D::rectangleToRectF(r), currentState->currentBrush);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
@@ -836,7 +841,7 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
 
         D2D1_SIZE_U size = { (UINT32)image.getWidth(), (UINT32)image.getHeight() };
         auto bp = D2D1::BitmapProperties();
@@ -861,7 +866,7 @@ void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
 
         deviceContext->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
@@ -893,7 +898,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
     {
         auto hScale = currentState->font.getHorizontalScale();
 
-        deviceContext->SetTransform(transformToMatrix(AffineTransform::scale(hScale, 1.0f)
+        deviceContext->SetTransform(Direct2D::transformToMatrix(AffineTransform::scale(hScale, 1.0f)
             .followedBy(transform)
             .followedBy(currentState->currentTransform.getTransform())));
 
@@ -920,7 +925,7 @@ bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& te
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
 
         DirectWriteTypeLayout::drawToD2DContext(text, area,
             *(deviceContext),
