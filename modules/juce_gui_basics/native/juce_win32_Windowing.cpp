@@ -3678,6 +3678,7 @@ private:
                 if (direct2DContext)
                 {
                     direct2DContext->startResizing();
+                    handlePaintMessage();
                 }
                 break;
             
@@ -3685,6 +3686,7 @@ private:
                 if (direct2DContext)
                 {
                     direct2DContext->finishResizing();
+                    handlePaintMessage();
                 }
                 break; 
 #endif

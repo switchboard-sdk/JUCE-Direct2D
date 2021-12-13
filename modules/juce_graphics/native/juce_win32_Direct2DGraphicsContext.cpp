@@ -236,6 +236,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         bltModeChildWindow = std::make_unique<Direct2DChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
         activeChildWindow = bltModeChildWindow.get();
 
+        // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
+
         flipModeChildWindow.setVisible(false);
     }
 
@@ -252,6 +254,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         flipModeChildWindow.resized();
         flipModeChildWindow.setVisible(true);
         activeChildWindow = &flipModeChildWindow;
+
+        // xxx copy blt child window bitmap -> flip mode child window bitmap?
 
         bltModeChildWindow = nullptr;
     }
