@@ -248,6 +248,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     void resized()
     {
+        flipModeChildWindow.resized();
         if (bltModeChildWindow)
         {
             bltModeChildWindow->resized();
