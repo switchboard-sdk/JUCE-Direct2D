@@ -304,6 +304,8 @@ public:
 
             font = owner.currentState->font;
             currentFontFace = owner.currentState->currentFontFace;
+
+            interpolationMode = owner.currentState->interpolationMode;
         }
         else
         {
@@ -580,6 +582,8 @@ public:
 
     FillType fillType;
 
+    D2D1_INTERPOLATION_MODE interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SavedState)
 };
 
@@ -795,11 +799,22 @@ void Direct2DLowLevelGraphicsContext::setOpacity (float newOpacity)
     currentState->setOpacity (newOpacity);
 }
 
-void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality /*quality*/)
+void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality quality)
 {
-    //
-    // Need a Direct2D 1.1 device context to implement this
-    //
+    switch (quality)
+    {
+    case Graphics::ResamplingQuality::lowResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+        break;
+
+    case Graphics::ResamplingQuality::mediumResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+        break;
+
+    case Graphics::ResamplingQuality::highResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC;
+        break;
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*replaceExistingContents*/)
@@ -856,7 +871,10 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
             ComSmartPtr<ID2D1Bitmap> tempBitmap;
             deviceContext->CreateBitmap(size, bd.data, bd.lineStride, bp, tempBitmap.resetAndGetPointerAddress());
             if (tempBitmap != nullptr)
-                deviceContext->DrawBitmap(tempBitmap);
+            {
+                deviceContext->DrawImage(tempBitmap, currentState->interpolationMode);
+            }
+                
         }
 
         deviceContext->SetTransform(D2D1::IdentityMatrix());
