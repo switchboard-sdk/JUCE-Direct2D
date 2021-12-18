@@ -81,6 +81,11 @@ namespace juce
                 MoveWindow(hwnd, 0, 0, width, height, TRUE);
             }
 
+            bool needsFullRender() const
+            {
+                return !allBuffersPresented;
+            }
+
             void startRender()
             {
                 createDeviceContext();
@@ -95,16 +100,49 @@ namespace juce
                 }
             }
 
-            void finishRender()
+            void finishRender(Rectangle<int>* updateRect)
             {
                 if (deviceContext != nullptr && swapChain != nullptr)
                 {
                     auto hr = deviceContext->EndDraw();
+
                     deviceContext->SetTarget(nullptr);
 
                     if (SUCCEEDED(hr))
                     {
-                        hr = swapChain->Present(1, 0);
+                        if (updateRect != nullptr && allBuffersPresented)
+                        {
+                            RECT dirtyRectangle
+                            {
+                                updateRect->getX(),
+                                updateRect->getY(),
+                                updateRect->getRight(),
+                                updateRect->getBottom()
+                            };
+                            DXGI_PRESENT_PARAMETERS presentParameters
+                            {
+                                1,
+                                &dirtyRectangle,
+                                nullptr,
+                                nullptr
+                            };
+
+                            hr = swapChain->Present1(1, 0, &presentParameters);
+                        }
+                        else
+                        {
+                            hr = swapChain->Present(1, 0);
+
+                            //
+                            // Every buffer in the swap chain needs to be presented without dirty rectangles once
+                            // before calling Present1 with dirty rectangles
+                            // 
+                            if (!allBuffersPresented)
+                            {
+                                ++numPresentedBuffers;
+                                allBuffersPresented = numPresentedBuffers >= bufferCount;
+                            }
+                        }
                     }
 
                     if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
@@ -160,6 +198,8 @@ namespace juce
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
             DXGI_SCALING const scaling;
+            bool allBuffersPresented = false;
+            UINT numPresentedBuffers = 0;
             HWND hwnd = nullptr;
             SharedResourcePointer<Direct2DFactories> factories;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
@@ -244,6 +284,9 @@ namespace juce
                                             swapChain.resetAndGetPointerAddress());
                                         if (SUCCEEDED(hr))
                                         {
+                                            allBuffersPresented = false;
+                                            numPresentedBuffers = 0;
+
                                             ComSmartPtr<ID2D1Device> direct2DDevice;
                                             hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                             if (SUCCEEDED(hr))
@@ -272,6 +315,9 @@ namespace juce
                 swapChainBuffer = nullptr;
                 swapChain = nullptr;
                 deviceContext = nullptr;
+
+                allBuffersPresented = false;
+                numPresentedBuffers = 0;
             }
 
             void createSwapChainBuffer()

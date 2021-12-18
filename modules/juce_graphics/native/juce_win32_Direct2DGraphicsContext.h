@@ -81,8 +81,9 @@ public:
     void resized();
     void finishResizing();
 
+    bool needsFullRepaint() const;
     void start();
-    void end();
+    void end(Rectangle<int>* updateRect = nullptr);
 
     //==============================================================================
 private:

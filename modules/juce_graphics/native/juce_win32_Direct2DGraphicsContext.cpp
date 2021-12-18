@@ -266,14 +266,19 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         bltModeChildWindow = nullptr;
     }
 
+    bool needsFullRepaint() const
+    {
+        return bltModeChildWindow != nullptr || flipModeChildWindow.needsFullRender();
+    }
+
     void startRender()
     {
         activeChildWindow->startRender();
     }
 
-    void finishRender()
+    void finishRender(Rectangle<int>* updateRect)
     {
-        activeChildWindow->finishRender();
+        activeChildWindow->finishRender(updateRect);
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
@@ -614,6 +619,11 @@ void Direct2DLowLevelGraphicsContext::finishResizing()
     pimpl->finishResizing();
 }
 
+bool Direct2DLowLevelGraphicsContext::needsFullRepaint() const
+{
+    return pimpl->needsFullRepaint();
+}
+
 void Direct2DLowLevelGraphicsContext::start()
 {
     pimpl->startRender();
@@ -621,7 +631,7 @@ void Direct2DLowLevelGraphicsContext::start()
     saveState();
 }
 
-void Direct2DLowLevelGraphicsContext::end()
+void Direct2DLowLevelGraphicsContext::end(Rectangle<int>* updateRect)
 {
     while (states.size() > 0)
     {
@@ -629,7 +639,7 @@ void Direct2DLowLevelGraphicsContext::end()
     }
     currentState = nullptr;
 
-    pimpl->finishRender();
+    pimpl->finishRender(updateRect);
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
@@ -874,7 +884,6 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
             {
                 deviceContext->DrawImage(tempBitmap, currentState->interpolationMode);
             }
-                
         }
 
         deviceContext->SetTransform(D2D1::IdentityMatrix());
