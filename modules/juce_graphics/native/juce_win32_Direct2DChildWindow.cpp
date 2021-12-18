@@ -100,9 +100,11 @@ namespace juce
                 if (deviceContext != nullptr && swapChain != nullptr)
                 {
                     auto hr = deviceContext->EndDraw();
+                    deviceContext->SetTarget(nullptr);
+
                     if (SUCCEEDED(hr))
                     {
-                        hr = swapChain->Present(1, D2D1_PRESENT_OPTIONS_NONE);
+                        hr = swapChain->Present(1, 0);
                     }
 
                     if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
