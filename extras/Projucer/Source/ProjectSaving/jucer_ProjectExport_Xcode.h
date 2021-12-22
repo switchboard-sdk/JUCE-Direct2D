@@ -660,7 +660,7 @@ public:
     bool launchProject() override
     {
        #if JUCE_MAC
-        return getIDEProjectFile().startAsProcess();
+        return getProjectBundle().startAsProcess();
        #else
         return false;
        #endif
@@ -673,11 +673,6 @@ public:
        #else
         return false;
        #endif
-    }
-
-    File getIDEProjectFile() const override
-    {
-        return getProjectBundle();
     }
 
     //==============================================================================
@@ -887,11 +882,11 @@ protected:
         //==============================================================================
         bool iOS;
 
-        ValueWithDefault macOSBaseSDK, macOSDeploymentTarget, macOSArchitecture, iosBaseSDK, iosDeploymentTarget,
-                         customXcodeFlags, plistPreprocessorDefinitions, codeSignIdentity,
-                         fastMathEnabled, stripLocalSymbolsEnabled, pluginBinaryCopyStepEnabled,
-                         vstBinaryLocation, vst3BinaryLocation, auBinaryLocation, rtasBinaryLocation,
-                         aaxBinaryLocation, unityPluginBinaryLocation;
+        ValueTreePropertyWithDefault macOSBaseSDK, macOSDeploymentTarget, macOSArchitecture, iosBaseSDK, iosDeploymentTarget,
+                                     customXcodeFlags, plistPreprocessorDefinitions, codeSignIdentity,
+                                     fastMathEnabled, stripLocalSymbolsEnabled, pluginBinaryCopyStepEnabled,
+                                     vstBinaryLocation, vst3BinaryLocation, auBinaryLocation, rtasBinaryLocation,
+                                     aaxBinaryLocation, unityPluginBinaryLocation;
 
         //==============================================================================
         void valueTreePropertyChanged (ValueTree&, const Identifier& property) override
@@ -968,7 +963,9 @@ protected:
             if (macOSArchitecture.get() == "default")
                 macOSArchitecture.resetToDefault();
 
-            const auto updateSDKString = [this] (const Identifier& propertyName, ValueWithDefault& value, const String& suffix)
+            const auto updateSDKString = [this] (const Identifier& propertyName,
+                                                 ValueTreePropertyWithDefault& value,
+                                                 const String& suffix)
             {
                 auto sdkString = config[propertyName].toString();
 
@@ -2481,8 +2478,7 @@ private:
         if (isUsingDefaultSigningIdentity (config))
             return iOS ? "iPhone Developer" : "Mac Developer";
 
-        const auto identity = config.getCodeSignIdentityString();
-        return identity.isNotEmpty() ? identity : "-";
+        return config.getCodeSignIdentityString();
     }
 
     StringPairArray getProjectSettings (const XcodeBuildConfiguration& config) const
@@ -3375,7 +3371,7 @@ private:
     {
         std::map<String, String> attributes;
 
-        attributes["LastUpgradeCheck"] = "1310";
+        attributes["LastUpgradeCheck"] = "1320";
         attributes["ORGANIZATIONNAME"] = getProject().getCompanyNameString().quoted();
 
         if (projectType.isGUIApplication() || projectType.isAudioPlugin())
@@ -3561,24 +3557,24 @@ private:
 
     const bool iOS;
 
-    ValueWithDefault applicationCategoryValue,
-                     customPListValue, pListPrefixHeaderValue, pListPreprocessValue,
-                     subprojectsValue,
-                     validArchsValue,
-                     extraFrameworksValue, frameworkSearchPathsValue, extraCustomFrameworksValue, embeddedFrameworksValue,
-                     postbuildCommandValue, prebuildCommandValue,
-                     duplicateAppExResourcesFolderValue, iosDeviceFamilyValue, iPhoneScreenOrientationValue,
-                     iPadScreenOrientationValue, customXcodeResourceFoldersValue, customXcassetsFolderValue,
-                     appSandboxValue, appSandboxInheritanceValue, appSandboxOptionsValue,
-                     hardenedRuntimeValue, hardenedRuntimeOptionsValue,
-                     microphonePermissionNeededValue, microphonePermissionsTextValue,
-                     cameraPermissionNeededValue, cameraPermissionTextValue,
-                     bluetoothPermissionNeededValue, bluetoothPermissionTextValue,
-                     sendAppleEventsPermissionNeededValue, sendAppleEventsPermissionTextValue,
-                     uiFileSharingEnabledValue, uiSupportsDocumentBrowserValue, uiStatusBarHiddenValue, uiRequiresFullScreenValue, documentExtensionsValue, iosInAppPurchasesValue,
-                     iosContentSharingValue, iosBackgroundAudioValue, iosBackgroundBleValue, iosPushNotificationsValue, iosAppGroupsValue, iCloudPermissionsValue,
-                     networkingMulticastValue, iosDevelopmentTeamIDValue, iosAppGroupsIDValue, keepCustomXcodeSchemesValue, useHeaderMapValue, customLaunchStoryboardValue,
-                     exporterBundleIdentifierValue, suppressPlistResourceUsageValue, useLegacyBuildSystemValue, buildNumber;
+    ValueTreePropertyWithDefault applicationCategoryValue,
+                                 customPListValue, pListPrefixHeaderValue, pListPreprocessValue,
+                                 subprojectsValue,
+                                 validArchsValue,
+                                 extraFrameworksValue, frameworkSearchPathsValue, extraCustomFrameworksValue, embeddedFrameworksValue,
+                                 postbuildCommandValue, prebuildCommandValue,
+                                 duplicateAppExResourcesFolderValue, iosDeviceFamilyValue, iPhoneScreenOrientationValue,
+                                 iPadScreenOrientationValue, customXcodeResourceFoldersValue, customXcassetsFolderValue,
+                                 appSandboxValue, appSandboxInheritanceValue, appSandboxOptionsValue,
+                                 hardenedRuntimeValue, hardenedRuntimeOptionsValue,
+                                 microphonePermissionNeededValue, microphonePermissionsTextValue,
+                                 cameraPermissionNeededValue, cameraPermissionTextValue,
+                                 bluetoothPermissionNeededValue, bluetoothPermissionTextValue,
+                                 sendAppleEventsPermissionNeededValue, sendAppleEventsPermissionTextValue,
+                                 uiFileSharingEnabledValue, uiSupportsDocumentBrowserValue, uiStatusBarHiddenValue, uiRequiresFullScreenValue, documentExtensionsValue, iosInAppPurchasesValue,
+                                 iosContentSharingValue, iosBackgroundAudioValue, iosBackgroundBleValue, iosPushNotificationsValue, iosAppGroupsValue, iCloudPermissionsValue,
+                                 networkingMulticastValue, iosDevelopmentTeamIDValue, iosAppGroupsIDValue, keepCustomXcodeSchemesValue, useHeaderMapValue, customLaunchStoryboardValue,
+                                 exporterBundleIdentifierValue, suppressPlistResourceUsageValue, useLegacyBuildSystemValue, buildNumber;
 
     JUCE_DECLARE_NON_COPYABLE (XcodeProjectExporter)
 };
