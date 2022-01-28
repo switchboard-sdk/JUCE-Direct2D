@@ -350,7 +350,7 @@ public:
 
         if (asioObject != nullptr)
         {
-            for (auto rate : { 8000, 11025, 16000, 22050, 32000,
+            for (auto rate : { 8000, 11025, 16000, 22050, 24000, 32000,
                                44100, 48000, 88200, 96000, 176400,
                                192000, 352800, 384000, 705600, 768000 })
                 if (asioObject->canSampleRate ((double) rate) == 0)
@@ -919,7 +919,7 @@ private:
         {
             granularity = jmax (16, (int) granularity);
 
-            for (int i = jmax ((int) (minSize + 15) & ~15, (int) granularity); i < jmin (6400, (int) maxSize); i += granularity)
+            for (int i = jmax ((int) (minSize + 15) & ~15, (int) granularity); i <= jmin (6400, (int) maxSize); i += granularity)
                 bufferSizes.addIfNotAlreadyThere (granularity * (i / granularity));
         }
         else if (granularity < 0)
