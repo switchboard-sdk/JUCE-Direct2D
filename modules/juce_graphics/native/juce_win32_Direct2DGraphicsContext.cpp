@@ -148,7 +148,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_) :
         hwnd(hwnd_),
+#if JUCE_DIRECT2D_FLIP_MODE
         flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE)
+#else
+        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH)
+#endif
     {
     }
 
@@ -236,6 +240,21 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return activeChildWindow->getColourBrush();
     }
 
+
+    void resized()
+    {
+#if JUCE_DIRECT2D_FLIP_MODE
+        flipModeChildWindow.resized();
+        if (bltModeChildWindow)
+        {
+            bltModeChildWindow->resized();
+        }
+#else
+        bltModeChildWindow.resized();
+#endif
+    }
+
+#if JUCE_DIRECT2D_FLIP_MODE
     void startResizing()
     {
         bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
@@ -244,15 +263,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
 
         flipModeChildWindow.setVisible(false);
-    }
-
-    void resized()
-    {
-        flipModeChildWindow.resized();
-        if (bltModeChildWindow)
-        {
-            bltModeChildWindow->resized();
-        }
     }
 
     void finishResizing()
@@ -270,6 +280,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
     {
         return bltModeChildWindow != nullptr || flipModeChildWindow.needsFullRender();
     }
+#endif
 
     void startRender()
     {
@@ -286,9 +297,14 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 private:
     HWND hwnd = nullptr;
     Direct2D::ChildWindow::Class childWindowClass;
+#if JUCE_DIRECT2D_FLIP_MODE
     Direct2D::ChildWindow flipModeChildWindow;
     std::unique_ptr<Direct2D::ChildWindow> bltModeChildWindow;
     Direct2D::ChildWindow* activeChildWindow = &flipModeChildWindow;
+#else
+    Direct2D::ChildWindow bltModeChildWindow;
+    Direct2D::ChildWindow* activeChildWindow = &bltModeChildWindow;
+#endif
 };
 
 //==============================================================================
@@ -472,8 +488,7 @@ public:
             }
             else if (fillType.isGradient())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix (currentTransform.getTransformWith(fillType.transform)) };
-
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix(fillType.transform) };
                 const int numColors = fillType.gradient->getNumColours();
 
                 HeapBlock<D2D1_GRADIENT_STOP> stops (numColors);
@@ -606,7 +621,9 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
 
 void Direct2DLowLevelGraphicsContext::startResizing()
 {
+#if JUCE_DIRECT2D_FLIP_MODE
     pimpl->startResizing();
+#endif
 }
 
 void Direct2DLowLevelGraphicsContext::resized()
@@ -616,12 +633,18 @@ void Direct2DLowLevelGraphicsContext::resized()
 
 void Direct2DLowLevelGraphicsContext::finishResizing()
 {
+#if JUCE_DIRECT2D_FLIP_MODE
     pimpl->finishResizing();
+#endif
 }
 
 bool Direct2DLowLevelGraphicsContext::needsFullRepaint() const
 {
+#if JUCE_DIRECT2D_FLIP_MODE
     return pimpl->needsFullRepaint();
+#else
+    return true;
+#endif
 }
 
 void Direct2DLowLevelGraphicsContext::start()
@@ -836,8 +859,8 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
         deviceContext->FillRectangle(Direct2D::rectangleToRectF(r), currentState->currentBrush);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
     }

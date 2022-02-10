@@ -1483,7 +1483,11 @@ public:
         : ComponentPeer (comp, windowStyleFlags),
           dontRepaint (nonRepainting),
           parentToAddTo (parent),
+#if JUCE_DIRECT2D
+          currentRenderingEngine(direct2DRenderingEngine)
+#else
           currentRenderingEngine (softwareRenderingEngine)
+#endif
     {
         callFunctionIfNotLocked (&createWindowCallback, this);
 
