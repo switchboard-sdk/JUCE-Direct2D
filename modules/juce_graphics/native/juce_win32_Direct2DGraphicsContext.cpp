@@ -877,11 +877,11 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        ComSmartPtr<ID2D1Geometry> geometry(pimpl->pathToPathGeometry(p, currentState->currentTransform.getTransformWith(transform)));
-
-        if (geometry != nullptr)
+        if (auto geometry = pimpl->pathToPathGeometry(p, transform))
         {
+            deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
             deviceContext->FillGeometry(geometry, currentState->currentBrush);
+            deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
     }
 }
