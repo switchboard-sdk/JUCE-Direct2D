@@ -8,11 +8,18 @@ namespace juce
         class ChildWindow
         {
         public:
-            ChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING scaling_) :
+            ChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING scaling_, bool tearingSupported) :
                 parentHwnd(parentHwnd_),
                 swapEffect(swapEffect_),
                 bufferCount(bufferCount_),
-                scaling(scaling_)
+                scaling(scaling_),
+                swapChainFlags(DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING),
+                presentSyncInterval(0),
+                presentFlags(DXGI_PRESENT_ALLOW_TEARING)
+
+//                 swapChainFlags(tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
+//                 presentSyncInterval(tearingSupported ? 0 : 1),
+//                 presentFlags(tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0)
             {
                 HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
 
@@ -64,7 +71,7 @@ namespace juce
                 {
                     swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-                    auto hr = swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+                    auto hr = swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, swapChainFlags);
                     if (SUCCEEDED(hr))
                     {
                         createSwapChainBuffer();
@@ -127,11 +134,11 @@ namespace juce
                                 nullptr
                             };
 
-                            hr = swapChain->Present1(1, 0, &presentParameters);
+                            hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                         }
                         else
                         {
-                            hr = swapChain->Present(1, 0);
+                            hr = swapChain->Present(presentSyncInterval, presentFlags);
 
                             //
                             // Every buffer in the swap chain needs to be presented without dirty rectangles once
@@ -198,6 +205,9 @@ namespace juce
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
             DXGI_SCALING const scaling;
+            uint32 const swapChainFlags;
+            uint32 const presentSyncInterval;
+            uint32 const presentFlags;
             bool allBuffersPresented = false;
             UINT numPresentedBuffers = 0;
             HWND hwnd = nullptr;
@@ -276,6 +286,7 @@ namespace juce
                                         swapChainDescription.BufferCount = bufferCount;
                                         swapChainDescription.SwapEffect = swapEffect;
                                         swapChainDescription.Scaling = scaling;
+                                        swapChainDescription.Flags = swapChainFlags;
                                         hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                             hwnd,
                                             &swapChainDescription,

@@ -140,18 +140,42 @@ namespace juce
             sink->EndFigure(D2D1_FIGURE_END_CLOSED);
         }
 
+        bool isTearingSupported()
+        {
+            // Rather than create the 1.5 factory interface directly, we create the 1.4
+            // interface and query for the 1.5 interface. This will enable the graphics
+            // debugging tools which might not support the 1.5 factory interface.
+#if 0
+            ComSmartPtr<IDXGIFactory4> factory4;
+            auto hr = CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)factory4.resetAndGetPointerAddress());
+            if (SUCCEEDED(hr))
+            {
+                auto factory5 = factory4.getInterface<IDXGIFactory5>();
+                if (factory5)
+                {
+                    BOOL allowTearing;
+                    hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+                    return SUCCEEDED(hr) && allowTearing;
+                }
+            }
+#endif
+
+            return false;
+        }
+
     } // namespace Direct2D
 
 //==============================================================================
 
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    Pimpl(HWND hwnd_) :
+    Pimpl(HWND hwnd_, bool tearingSupported_) :
         hwnd(hwnd_),
+        tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_FLIP_MODE
-        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE)
+        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_)
 #else
-        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH)
+        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_)
 #endif
     {
     }
@@ -257,7 +281,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 #if JUCE_DIRECT2D_FLIP_MODE
     void startResizing()
     {
-        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH);
+        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported);
         activeChildWindow = bltModeChildWindow.get();
 
         // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
@@ -296,6 +320,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
+    bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
 #if JUCE_DIRECT2D_FLIP_MODE
     Direct2D::ChildWindow flipModeChildWindow;
@@ -610,7 +635,7 @@ public:
 //==============================================================================
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_))
+      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported()))
 {
 }
 

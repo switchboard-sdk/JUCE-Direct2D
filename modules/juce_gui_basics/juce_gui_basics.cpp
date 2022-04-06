@@ -91,6 +91,7 @@
    #pragma comment (lib, "Dwrite.lib")
    #pragma comment (lib, "D2d1.lib")
    #pragma comment (lib, "D3D11.lib")
+   #pragma comment (lib, "DXGI.lib")
   #endif
  #endif
 #endif

@@ -69,6 +69,7 @@
   #include <d2d1_1.h>
   #include <d3d11_1.h>
   #include <dwrite.h>
+  #include <dxgi1_5.h>
  #endif
 
  #if JUCE_MINGW
