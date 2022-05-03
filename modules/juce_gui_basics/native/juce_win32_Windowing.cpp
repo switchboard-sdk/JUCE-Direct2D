@@ -2747,9 +2747,13 @@ private:
     void updateDirect2DContext()
     {
         if (currentRenderingEngine != direct2DRenderingEngine)
+        {
             direct2DContext = nullptr;
+        }
         else if (direct2DContext == nullptr)
-            direct2DContext.reset (new Direct2DLowLevelGraphicsContext (hwnd));
+        {
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, getPlatformScaleFactor());
+        }
     }
    #endif
 
@@ -3556,6 +3560,13 @@ private:
             jassertfalse;
             return 0;
         }
+
+#if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
+        {
+            direct2DContext->setScaleFactor(newScale);
+        }
+#endif
 
         updateShadower();
         InvalidateRect (hwnd, nullptr, FALSE);

@@ -169,13 +169,14 @@ namespace juce
 
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    Pimpl(HWND hwnd_, bool tearingSupported_) :
+    Pimpl(HWND hwnd_, double scaleFactor_, bool tearingSupported_) :
         hwnd(hwnd_),
+        scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_FLIP_MODE
-        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_)
+        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_, scaleFactor_)
 #else
-        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_)
+        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #endif
     {
     }
@@ -281,7 +282,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 #if JUCE_DIRECT2D_FLIP_MODE
     void startResizing()
     {
-        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported);
+        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported, scaleFactor);
         activeChildWindow = bltModeChildWindow.get();
 
         // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
@@ -316,10 +317,21 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         activeChildWindow->finishRender(updateRect);
     }
 
+    void setScaleFactor(double scale_)
+    {
+        scaleFactor = scale_;
+    }
+
+    double getScaleFactor() const
+    {
+        return scaleFactor;
+    }
+
     SharedResourcePointer<Direct2DFactories> factories;
 
 private:
     HWND hwnd = nullptr;
+    double scaleFactor = 1.0;
     bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
 #if JUCE_DIRECT2D_FLIP_MODE
@@ -361,6 +373,12 @@ public:
                 clipRegion.setSize(size.width, size.height);
             }
             setFill(FillType(Colours::black));
+
+            //
+            // Set initial currentTransform to scale for DPI
+            //
+            auto scaleFactor = (float)owner.getScaleFactor();
+            currentTransform.addTransform(AffineTransform::scale(scaleFactor, scaleFactor));
         }
     }
 
@@ -633,9 +651,9 @@ public:
 };
 
 //==============================================================================
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, double scaleFactor_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported()))
+      pimpl (new Pimpl(hwnd_, scaleFactor_, Direct2D::isTearingSupported()))
 {
 }
 
@@ -1012,6 +1030,16 @@ bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& te
     }
 
     return true;
+}
+
+void Direct2DLowLevelGraphicsContext::setScaleFactor(double scale_)
+{
+    pimpl->setScaleFactor(scale_);
+}
+
+double Direct2DLowLevelGraphicsContext::getScaleFactor() const
+{
+    return pimpl->getScaleFactor();
 }
 
 } // namespace juce

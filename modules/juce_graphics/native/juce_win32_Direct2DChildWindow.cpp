@@ -8,14 +8,15 @@ namespace juce
         class ChildWindow
         {
         public:
-            ChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING scaling_, bool tearingSupported) :
+            ChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING dxgiScaling_, bool tearingSupported, double scaleFactor_) :
                 parentHwnd(parentHwnd_),
                 swapEffect(swapEffect_),
                 bufferCount(bufferCount_),
-                scaling(scaling_),
-                swapChainFlags(DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING),
-                presentSyncInterval(0),
-                presentFlags(DXGI_PRESENT_ALLOW_TEARING)
+                dxgiScaling(dxgiScaling_),
+                scaleFactor(scaleFactor_),
+                swapChainFlags(0/*DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING*/),
+                presentSyncInterval(1),
+                presentFlags(0/*DXGI_PRESENT_ALLOW_TEARING*/)
 
 //                 swapChainFlags(tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
 //                 presentSyncInterval(tearingSupported ? 0 : 1),
@@ -26,13 +27,16 @@ namespace juce
                 RECT parentRect;
                 GetClientRect(parentHwnd_, &parentRect);
 
+                int width = roundToInt((parentRect.right - parentRect.left) * scaleFactor_);
+                int height = roundToInt((parentRect.bottom - parentRect.top) * scaleFactor_);
+
                 hwnd = CreateWindowW(className_.toWideCharPointer(),
                     nullptr,
                     WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
                     CW_USEDEFAULT,
                     CW_USEDEFAULT,
-                    parentRect.right - parentRect.left,
-                    parentRect.bottom - parentRect.top,
+                    width,
+                    height,
                     parentHwnd_,
                     nullptr,
                     moduleHandle,
@@ -56,8 +60,8 @@ namespace juce
                 //
                 RECT windowRect;
                 GetClientRect(parentHwnd, &windowRect);
-                auto width = windowRect.right - windowRect.left;
-                auto height = windowRect.bottom - windowRect.top;
+                auto width = roundToInt((windowRect.right - windowRect.left) * scaleFactor);
+                auto height = roundToInt((windowRect.bottom - windowRect.top) * scaleFactor);
 
                 //
                 // Resize the swap chain 
@@ -204,7 +208,8 @@ namespace juce
             HWND const parentHwnd;
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
-            DXGI_SCALING const scaling;
+            DXGI_SCALING const dxgiScaling;
+            double scaleFactor;
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
@@ -285,7 +290,7 @@ namespace juce
                                         swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
                                         swapChainDescription.BufferCount = bufferCount;
                                         swapChainDescription.SwapEffect = swapEffect;
-                                        swapChainDescription.Scaling = scaling;
+                                        swapChainDescription.Scaling = dxgiScaling;
                                         swapChainDescription.Flags = swapChainFlags;
                                         hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                             hwnd,
