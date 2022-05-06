@@ -77,9 +77,10 @@ public:
     void drawGlyph (int glyphNumber, const AffineTransform&) override;
     bool drawTextLayout (const AttributedString&, const Rectangle<float>&) override;
 
-    void startResizing();
     void resized();
-    void finishResizing();
+
+    void setVisible(bool visible);
+    bool isVisible() const;
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
     bool needsFullRepaint() const;

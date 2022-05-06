@@ -92,10 +92,12 @@ namespace juce
                 MoveWindow(hwnd, 0, 0, width, height, TRUE);
             }
 
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
             bool needsFullRender() const
             {
                 return !allBuffersPresented;
             }
+#endif
 
             void startRender()
             {
@@ -176,6 +178,11 @@ namespace juce
             void setVisible(bool visible)
             {
                 ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
+            }
+
+            bool isVisible() const
+            {
+                return IsWindowVisible(hwnd);
             }
 
             struct Class

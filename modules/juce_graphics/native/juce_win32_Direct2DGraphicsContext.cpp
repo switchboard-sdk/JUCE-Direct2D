@@ -271,20 +271,22 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         childWindow.resized();
     }
 
-    void startResizing()
+    void setVisible(bool visible)
     {
-        childWindow.setVisible(false);
+        childWindow.setVisible(visible);
     }
 
-    void finishResizing()
+    bool isVisible() const
     {
-        childWindow.setVisible(true);
+        return childWindow.isVisible();
     }
 
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
     bool needsFullRepaint() const
     {
         return childWindow.needsFullRender();
     }
+#endif
 
     void startRender()
     {
@@ -634,19 +636,19 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
     states.clear();
 }
 
-void Direct2DLowLevelGraphicsContext::startResizing()
-{
-    pimpl->startResizing();
-}
-
 void Direct2DLowLevelGraphicsContext::resized()
 {
     pimpl->resized();
 }
 
-void Direct2DLowLevelGraphicsContext::finishResizing()
+void Direct2DLowLevelGraphicsContext::setVisible(bool visible)
 {
-    pimpl->finishResizing();
+    pimpl->setVisible(visible);
+}
+
+bool Direct2DLowLevelGraphicsContext::isVisible() const 
+{
+    return pimpl->isVisible();
 }
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT

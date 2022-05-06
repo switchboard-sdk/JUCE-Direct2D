@@ -2551,77 +2551,90 @@ private:
     void handlePaintMessage()
     {
        #if JUCE_DIRECT2D
-        if (direct2DContext != nullptr)
+        if (direct2DContext != nullptr && direct2DContext->isVisible())
         {
-            //
-            // The Direct2D context may need to have the whole window painted 
-            // regardless of the update region
-            //
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-            if (direct2DContext->needsFullRepaint())
-#endif
-            {
-                //
-                // Paint the whole window
-                //
-                direct2DContext->start();
-                handlePaint(*direct2DContext);
-                direct2DContext->end();
-                ValidateRect(hwnd, nullptr);
-            }
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-            else
-            {
-                //
-                // Paint the update region
-                //
-                RECT physicalScreenUpdateRect;
-                if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
-                {
-                    auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
-                    direct2DContext->start();
-                    direct2DContext->clipToRectangle(logicalUpdateRect);
-                    handlePaint(*direct2DContext);
-                    direct2DContext->end(&logicalUpdateRect);
-                    ValidateRect(hwnd, &physicalScreenUpdateRect);
-                }
-            }
-#endif
+            handleDirect2DPaint();
         }
         else
        #endif
         {
-            HRGN rgn = CreateRectRgn (0, 0, 0, 0);
-            const int regionType = GetUpdateRgn (hwnd, rgn, false);
-
-            PAINTSTRUCT paintStruct;
-            HDC dc = BeginPaint (hwnd, &paintStruct); // Note this can immediately generate a WM_NCPAINT
-                                                      // message and become re-entrant, but that's OK
-
-            // if something in a paint handler calls, e.g. a message box, this can become reentrant and
-            // corrupt the image it's using to paint into, so do a check here.
-            static bool reentrant = false;
-
-            if (! reentrant)
-            {
-                const ScopedValueSetter<bool> setter (reentrant, true, false);
-
-                if (dontRepaint)
-                    component.handleCommandMessage (0); // (this triggers a repaint in the openGL context)
-                else
-                    performPaint (dc, rgn, regionType, paintStruct);
-            }
-
-            DeleteObject (rgn);
-            EndPaint (hwnd, &paintStruct);
-
-           #if JUCE_MSVC
-            _fpreset(); // because some graphics cards can unmask FP exceptions
-           #endif
-
+            handleGDIPaint();
         }
 
         lastPaintTime = Time::getMillisecondCounter();
+    }
+
+#if JUCE_DIRECT2D
+    void handleDirect2DPaint()
+    {
+        jassert(direct2DContext);
+
+        //
+        // The Direct2D context may need to have the whole window painted 
+        // regardless of the update region
+        //
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
+        if (direct2DContext->needsFullRepaint())
+#endif
+        {
+            //
+            // Paint the whole window
+            //
+            direct2DContext->start();
+            handlePaint(*direct2DContext);
+            direct2DContext->end();
+            ValidateRect(hwnd, nullptr);
+        }
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
+        else
+        {
+            //
+            // Paint the update region
+            //
+            RECT physicalScreenUpdateRect;
+            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
+            {
+                auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
+                direct2DContext->start();
+                direct2DContext->clipToRectangle(logicalUpdateRect);
+                handlePaint(*direct2DContext);
+                direct2DContext->end(&logicalUpdateRect);
+                ValidateRect(hwnd, &physicalScreenUpdateRect);
+            }
+        }
+#endif
+    }
+#endif
+
+    void handleGDIPaint()
+    {
+        HRGN rgn = CreateRectRgn(0, 0, 0, 0);
+        const int regionType = GetUpdateRgn(hwnd, rgn, false);
+
+        PAINTSTRUCT paintStruct;
+        HDC dc = BeginPaint(hwnd, &paintStruct); // Note this can immediately generate a WM_NCPAINT
+                                                  // message and become re-entrant, but that's OK
+
+        // if something in a paint handler calls, e.g. a message box, this can become reentrant and
+        // corrupt the image it's using to paint into, so do a check here.
+        static bool reentrant = false;
+
+        if (!reentrant)
+        {
+            const ScopedValueSetter<bool> setter(reentrant, true, false);
+
+            if (dontRepaint)
+                component.handleCommandMessage(0); // (this triggers a repaint in the openGL context)
+            else
+                performPaint(dc, rgn, regionType, paintStruct);
+        }
+
+        DeleteObject(rgn);
+        EndPaint(hwnd, &paintStruct);
+
+#if JUCE_MSVC
+        _fpreset(); // because some graphics cards can unmask FP exceptions
+#endif
     }
 
     void performPaint (HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
@@ -3772,16 +3785,16 @@ private:
             case WM_ENTERSIZEMOVE:
                 if (direct2DContext)
                 {
-                    direct2DContext->startResizing();
-                    handlePaintMessage();
+                    direct2DContext->setVisible(false);
                 }
                 break;
             
             case WM_EXITSIZEMOVE:
                 if (direct2DContext)
                 {
-                    direct2DContext->finishResizing();
-                    handlePaintMessage();
+                    direct2DContext->resized();
+                    handleDirect2DPaint();
+                    direct2DContext->setVisible(true);
                 }
                 break; 
 #endif
