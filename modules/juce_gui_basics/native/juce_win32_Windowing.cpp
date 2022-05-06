@@ -2557,7 +2557,9 @@ private:
             // The Direct2D context may need to have the whole window painted 
             // regardless of the update region
             //
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
             if (direct2DContext->needsFullRepaint())
+#endif
             {
                 //
                 // Paint the whole window
@@ -2567,6 +2569,7 @@ private:
                 direct2DContext->end();
                 ValidateRect(hwnd, nullptr);
             }
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
             else
             {
                 //
@@ -2583,6 +2586,7 @@ private:
                     ValidateRect(hwnd, &physicalScreenUpdateRect);
                 }
             }
+#endif
         }
         else
        #endif

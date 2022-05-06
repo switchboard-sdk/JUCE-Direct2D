@@ -174,9 +174,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_FLIP_MODE
-        flipModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_, scaleFactor_)
+        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_, scaleFactor_)
 #else
-        bltModeChildWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
+        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #endif
     {
     }
@@ -257,64 +257,43 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return activeChildWindow->getDeviceContext();
+        return childWindow.getDeviceContext();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return activeChildWindow->getColourBrush();
+        return childWindow.getColourBrush();
     }
 
 
     void resized()
     {
-#if JUCE_DIRECT2D_FLIP_MODE
-        flipModeChildWindow.resized();
-        if (bltModeChildWindow)
-        {
-            bltModeChildWindow->resized();
-        }
-#else
-        bltModeChildWindow.resized();
-#endif
+        childWindow.resized();
     }
 
-#if JUCE_DIRECT2D_FLIP_MODE
     void startResizing()
     {
-        bltModeChildWindow = std::make_unique<Direct2D::ChildWindow>(childWindowClass.className, hwnd, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported, scaleFactor);
-        activeChildWindow = bltModeChildWindow.get();
-
-        // xxx copy flip mode child window bitmap -> blt mode child window bitmap?
-
-        flipModeChildWindow.setVisible(false);
+        childWindow.setVisible(false);
     }
 
     void finishResizing()
     {
-        flipModeChildWindow.resized();
-        flipModeChildWindow.setVisible(true);
-        activeChildWindow = &flipModeChildWindow;
-
-        // xxx copy blt child window bitmap -> flip mode child window bitmap?
-
-        bltModeChildWindow = nullptr;
+        childWindow.setVisible(true);
     }
 
     bool needsFullRepaint() const
     {
-        return bltModeChildWindow != nullptr || flipModeChildWindow.needsFullRender();
+        return childWindow.needsFullRender();
     }
-#endif
 
     void startRender()
     {
-        activeChildWindow->startRender();
+        childWindow.startRender();
     }
 
     void finishRender(Rectangle<int>* updateRect)
     {
-        activeChildWindow->finishRender(updateRect);
+        childWindow.finishRender(updateRect);
     }
 
     void setScaleFactor(double scale_)
@@ -334,14 +313,7 @@ private:
     double scaleFactor = 1.0;
     bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
-#if JUCE_DIRECT2D_FLIP_MODE
-    Direct2D::ChildWindow flipModeChildWindow;
-    std::unique_ptr<Direct2D::ChildWindow> bltModeChildWindow;
-    Direct2D::ChildWindow* activeChildWindow = &flipModeChildWindow;
-#else
-    Direct2D::ChildWindow bltModeChildWindow;
-    Direct2D::ChildWindow* activeChildWindow = &bltModeChildWindow;
-#endif
+    Direct2D::ChildWindow childWindow;
 };
 
 //==============================================================================
@@ -664,9 +636,7 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
 
 void Direct2DLowLevelGraphicsContext::startResizing()
 {
-#if JUCE_DIRECT2D_FLIP_MODE
     pimpl->startResizing();
-#endif
 }
 
 void Direct2DLowLevelGraphicsContext::resized()
@@ -676,19 +646,15 @@ void Direct2DLowLevelGraphicsContext::resized()
 
 void Direct2DLowLevelGraphicsContext::finishResizing()
 {
-#if JUCE_DIRECT2D_FLIP_MODE
     pimpl->finishResizing();
-#endif
 }
 
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
 bool Direct2DLowLevelGraphicsContext::needsFullRepaint() const
 {
-#if JUCE_DIRECT2D_FLIP_MODE
     return pimpl->needsFullRepaint();
-#else
-    return true;
-#endif
 }
+#endif
 
 void Direct2DLowLevelGraphicsContext::start()
 {
