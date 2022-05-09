@@ -2558,7 +2558,33 @@ private:
         else
        #endif
         {
-            handleGDIPaint();
+            HRGN rgn = CreateRectRgn(0, 0, 0, 0);
+            const int regionType = GetUpdateRgn(hwnd, rgn, false);
+
+            PAINTSTRUCT paintStruct;
+            HDC dc = BeginPaint(hwnd, &paintStruct); // Note this can immediately generate a WM_NCPAINT
+                                                      // message and become re-entrant, but that's OK
+
+            // if something in a paint handler calls, e.g. a message box, this can become reentrant and
+            // corrupt the image it's using to paint into, so do a check here.
+            static bool reentrant = false;
+
+            if (!reentrant)
+            {
+                const ScopedValueSetter<bool> setter(reentrant, true, false);
+
+                if (dontRepaint)
+                    component.handleCommandMessage(0); // (this triggers a repaint in the openGL context)
+                else
+                    performPaint(dc, rgn, regionType, paintStruct);
+            }
+
+            DeleteObject(rgn);
+            EndPaint(hwnd, &paintStruct);
+
+#if JUCE_MSVC
+            _fpreset(); // because some graphics cards can unmask FP exceptions
+#endif
         }
 
         lastPaintTime = Time::getMillisecondCounter();
@@ -2604,38 +2630,31 @@ private:
         }
 #endif
     }
-#endif
 
-    void handleGDIPaint()
+    void paintImmediateGDI()
     {
-        HRGN rgn = CreateRectRgn(0, 0, 0, 0);
-        const int regionType = GetUpdateRgn(hwnd, rgn, false);
+        auto clientRect = getWindowClientRect(hwnd);
+        auto width = clientRect.right - clientRect.left;
+        auto height = clientRect.bottom - clientRect.top;
 
-        PAINTSTRUCT paintStruct;
-        HDC dc = BeginPaint(hwnd, &paintStruct); // Note this can immediately generate a WM_NCPAINT
-                                                  // message and become re-entrant, but that's OK
-
-        // if something in a paint handler calls, e.g. a message box, this can become reentrant and
-        // corrupt the image it's using to paint into, so do a check here.
-        static bool reentrant = false;
-
-        if (!reentrant)
+        auto rgn = CreateRectRgn(0, 0, width, height);
+        if (rgn != nullptr)
         {
-            const ScopedValueSetter<bool> setter(reentrant, true, false);
+            auto dc = GetDC(hwnd);
+            if (dc != nullptr)
+            {
+                PAINTSTRUCT paintStruct = {};
+                paintStruct.hdc = dc;
+                paintStruct.fErase = TRUE;
+                paintStruct.rcPaint = { 0, 0, width, height };
+                performPaint(dc, rgn, SIMPLEREGION, paintStruct);
 
-            if (dontRepaint)
-                component.handleCommandMessage(0); // (this triggers a repaint in the openGL context)
-            else
-                performPaint(dc, rgn, regionType, paintStruct);
+                ReleaseDC(hwnd, dc);
+            }
+            DeleteObject(rgn);
         }
-
-        DeleteObject(rgn);
-        EndPaint(hwnd, &paintStruct);
-
-#if JUCE_MSVC
-        _fpreset(); // because some graphics cards can unmask FP exceptions
-#endif
     }
+#endif
 
     void performPaint (HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
     {
@@ -3785,6 +3804,7 @@ private:
             case WM_ENTERSIZEMOVE:
                 if (direct2DContext)
                 {
+                    paintImmediateGDI();
                     direct2DContext->setVisible(false);
                 }
                 break;
