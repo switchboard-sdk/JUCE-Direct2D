@@ -597,6 +597,8 @@ public:
 
     auto* getNextChannelBuffer() { return buffer.getWritePointer (channelCounter++); }
 
+    auto getArrayOfWritePointers() { return buffer.getArrayOfWritePointers(); }
+
 private:
     AudioBuffer<FloatType> buffer;
     int channelCounter = 0;
@@ -625,7 +627,7 @@ static bool validateLayouts (Iterator first, Iterator last, const std::vector<Dy
         const auto anyChannelIsNull = std::any_of (busPtr, busPtr + it->numChannels, [] (auto* ptr) { return ptr == nullptr; });
 
         // Null channels are allowed if the bus is inactive
-        if ((mapIterator->isHostActive() && anyChannelIsNull) || ((int) mapIterator->size() != it->numChannels))
+        if (mapIterator->isHostActive() && (anyChannelIsNull || (int) mapIterator->size() != it->numChannels))
             return false;
     }
 
@@ -673,7 +675,10 @@ public:
         setUpInputChannels (data, (size_t) vstInputs, scratchBuffer, inputMap,  channels);
         setUpOutputChannels (scratchBuffer, outputMap, channels);
 
-        return { channels.data(), (int) channels.size(), (int) data.numSamples };
+        const auto channelPtr = channels.empty() ? scratchBuffer.getArrayOfWritePointers()
+                                                 : channels.data();
+
+        return { channelPtr, (int) channels.size(), (int) data.numSamples };
     }
 
 private:

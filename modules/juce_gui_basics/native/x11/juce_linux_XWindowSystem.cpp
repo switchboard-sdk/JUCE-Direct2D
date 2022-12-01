@@ -413,6 +413,31 @@ namespace Keys
     static bool capsLock = false;
     static char keyStates [32];
     static constexpr int extendedKeyModifier = 0x10000000;
+    static bool modifierKeysAreStale = false;
+
+    static void refreshStaleModifierKeys()
+    {
+        if (modifierKeysAreStale)
+        {
+            XWindowSystem::getInstance()->getNativeRealtimeModifiers();
+            modifierKeysAreStale = false;
+        }
+    }
+
+    // Call this function when only the mouse keys need to be refreshed e.g. when the event
+    // parameter already has information about the keys.
+    static void refreshStaleMouseKeys()
+    {
+        if (modifierKeysAreStale)
+        {
+            const auto oldMods = ModifierKeys::currentModifiers;
+            XWindowSystem::getInstance()->getNativeRealtimeModifiers();
+            ModifierKeys::currentModifiers = oldMods.withoutMouseButtons()
+                                                    .withFlags (ModifierKeys::currentModifiers.withOnlyMouseButtons()
+                                                                                              .getRawFlags());
+            modifierKeysAreStale = false;
+        }
+    }
 }
 
 const int KeyPress::spaceKey              = XK_space         & 0xff;
@@ -1747,17 +1772,17 @@ void XWindowSystem::setBounds (::Window windowH, Rectangle<int> newBounds, bool 
             X11Symbols::getInstance()->xSetWMNormalHints (display, windowH, hints.get());
         }
 
-        const auto windowBorder = [&]() -> BorderSize<int>
+        const auto nativeWindowBorder = [&]() -> BorderSize<int>
         {
             if (const auto& frameSize = peer->getFrameSizeIfPresent())
-                return *frameSize;
+                return frameSize->multipliedBy (peer->getPlatformScaleFactor());
 
             return {};
         }();
 
         X11Symbols::getInstance()->xMoveResizeWindow (display, windowH,
-                                                      newBounds.getX() - windowBorder.getLeft(),
-                                                      newBounds.getY() - windowBorder.getTop(),
+                                                      newBounds.getX() - nativeWindowBorder.getLeft(),
+                                                      newBounds.getY() - nativeWindowBorder.getTop(),
                                                       (unsigned int) newBounds.getWidth(),
                                                       (unsigned int) newBounds.getHeight());
     }
@@ -2448,6 +2473,18 @@ ModifierKeys XWindowSystem::getNativeRealtimeModifiers() const
 
     ModifierKeys::currentModifiers = ModifierKeys::currentModifiers.withoutMouseButtons().withFlags (mouseMods);
 
+    // We are keeping track of the state of modifier keys and mouse buttons with the assumption that
+    // for every mouse down we are going to receive a mouse up etc.
+    //
+    // This assumption is broken when getNativeRealtimeModifiers() is called. If for example we call
+    // this function when the mouse cursor is in another application and the mouse button happens to
+    // be down, then its represented state in currentModifiers may remain down indefinitely, since
+    // we aren't going to receive an event when it's released.
+    //
+    // We mark this state in this variable, and we can restore synchronization when our window
+    // receives an event again.
+    Keys::modifierKeysAreStale = true;
+
     return ModifierKeys::currentModifiers;
 }
 
@@ -2527,6 +2564,22 @@ Array<Displays::Display> XWindowSystem::findDisplays (float masterScale) const
                                         d.totalArea = { crtc->x, crtc->y, (int) crtc->width, (int) crtc->height };
                                         d.isMain = (mainDisplay == screens->outputs[j]) && (i == 0);
                                         d.dpi = DisplayHelpers::getDisplayDPI (display, 0);
+
+                                        d.verticalFrequencyHz = [&]() -> std::optional<double>
+                                        {
+                                            if (crtc->mode != None)
+                                            {
+                                                if (auto it = std::find_if (screens->modes,
+                                                                            screens->modes + screens->nmode,
+                                                                            [&crtc] (const auto& m) { return m.id == crtc->mode; });
+                                                    it != screens->modes + screens->nmode)
+                                                {
+                                                    return (double) it->dotClock / ((double) it->hTotal * (double) it->vTotal);
+                                                }
+                                            }
+
+                                            return {};
+                                        }();
 
                                         // The raspberry pi returns a zero sized display, so we need to guard for divide-by-zero
                                         if (output->mm_width > 0 && output->mm_height > 0)
@@ -3092,6 +3145,12 @@ XWindowSystem::VisualAndDepth XWindowSystem::DisplayVisuals::getBestVisualForWin
     if (visual24Bit != nullptr)
         return { visual24Bit, 24 };
 
+    if (visual32Bit != nullptr)
+        return { visual32Bit, 32 };
+
+    // No visual available!
+    jassert (visual16Bit != nullptr);
+
     return { visual16Bit, 16 };
 }
 
@@ -3310,6 +3369,7 @@ void XWindowSystem::handleWindowMessage (LinuxComponentPeer* peer, XEvent& event
 void XWindowSystem::handleKeyPressEvent (LinuxComponentPeer* peer, XKeyEvent& keyEvent) const
 {
     auto oldMods = ModifierKeys::currentModifiers;
+    Keys::refreshStaleModifierKeys();
 
     char utf8 [64] = { 0 };
     juce_wchar unicodeChar = 0;
@@ -3540,6 +3600,7 @@ void XWindowSystem::handleButtonReleaseEvent (LinuxComponentPeer* peer, const XB
 void XWindowSystem::handleMotionNotifyEvent (LinuxComponentPeer* peer, const XPointerMovedEvent& movedEvent) const
 {
     updateKeyModifiers ((int) movedEvent.state);
+    Keys::refreshStaleMouseKeys();
 
     auto& dragState = dragAndDropStateMap[peer];
 
