@@ -125,6 +125,34 @@ using namespace Steinberg;
 //==============================================================================
 #if JUCE_LINUX || JUCE_BSD
 
+enum class HostMessageThreadAttached { no, yes };
+
+class HostMessageThreadState
+{
+public:
+    template <typename Callback>
+    void setStateWithAction (HostMessageThreadAttached stateIn, Callback&& action)
+    {
+        const std::lock_guard<std::mutex> lock { m };
+        state = stateIn;
+        action();
+    }
+
+    void assertHostMessageThread()
+    {
+        const std::lock_guard<std::mutex> lock { m };
+
+        if (state == HostMessageThreadAttached::no)
+            return;
+
+        JUCE_ASSERT_MESSAGE_THREAD
+    }
+
+private:
+    HostMessageThreadAttached state = HostMessageThreadAttached::no;
+    std::mutex m;
+};
+
 class EventHandler final  : public Steinberg::Linux::IEventHandler,
                             private LinuxEventLoopInternal::Listener
 {
@@ -141,7 +169,8 @@ public:
         LinuxEventLoopInternal::deregisterLinuxEventLoopListener (*this);
 
         if (! messageThread->isRunning())
-            messageThread->start();
+            hostMessageThreadState.setStateWithAction (HostMessageThreadAttached::no,
+                                                       [this]() { messageThread->start(); });
     }
 
     JUCE_DECLARE_VST3_COM_REF_METHODS
@@ -171,6 +200,17 @@ public:
     {
         if (auto* runLoop = getRunLoopFromFrame (plugFrame))
             refreshAttachedEventLoop ([this, runLoop] { hostRunLoops.erase (runLoop); });
+    }
+
+    /* Asserts if it can be established that the calling thread is different from the host's message
+       thread.
+
+       On Linux this can only be determined if the host has already registered its run loop. Until
+       then JUCE messages are serviced by a background thread internal to the plugin.
+    */
+    static void assertHostMessageThread()
+    {
+        hostMessageThreadState.assertHostMessageThread();
     }
 
 private:
@@ -240,7 +280,8 @@ private:
             if (messageThread->isRunning())
                 messageThread->stop();
 
-            MessageManager::getInstance()->setCurrentThreadAsMessageThread();
+            hostMessageThreadState.setStateWithAction (HostMessageThreadAttached::yes,
+                                                       [] { MessageManager::getInstance()->setCurrentThreadAsMessageThread(); });
         }
     }
 
@@ -283,12 +324,25 @@ private:
     std::multiset<Steinberg::Linux::IRunLoop*> hostRunLoops;
     AttachedEventLoop attachedEventLoop;
 
+    static HostMessageThreadState hostMessageThreadState;
+
     //==============================================================================
     JUCE_DECLARE_NON_MOVEABLE (EventHandler)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EventHandler)
 };
 
+HostMessageThreadState EventHandler::hostMessageThreadState;
+
 #endif
+
+static void assertHostMessageThread()
+{
+   #if JUCE_LINUX || JUCE_BSD
+    EventHandler::assertHostMessageThread();
+   #else
+    JUCE_ASSERT_MESSAGE_THREAD
+   #endif
+}
 
 //==============================================================================
 class InParameterChangedCallbackSetter
@@ -377,9 +431,11 @@ public:
         {
             info.id             = Vst::kRootUnitId;
             info.parentUnitId   = Vst::kNoParentUnitId;
-            info.programListId  = Vst::kNoProgramListId;
+            info.programListId  = getProgramListCount() > 0
+                                ? static_cast<Vst::ProgramListID> (programParamID)
+                                : Vst::kNoProgramListId;
 
-            toString128 (info.name, TRANS("Root Unit"));
+            toString128 (info.name, TRANS ("Root Unit"));
 
             return kResultTrue;
         }
@@ -413,7 +469,7 @@ public:
             info.id = static_cast<Vst::ProgramListID> (programParamID);
             info.programCount = static_cast<Steinberg::int32> (audioProcessor->getNumPrograms());
 
-            toString128 (info.name, TRANS("Factory Presets"));
+            toString128 (info.name, TRANS ("Factory Presets"));
 
             return kResultTrue;
         }
@@ -446,8 +502,8 @@ public:
 
     tresult PLUGIN_API getUnitByBus (Vst::MediaType, Vst::BusDirection, Steinberg::int32, Steinberg::int32, Vst::UnitID& unitId) override
     {
-        zerostruct (unitId);
-        return kNotImplemented;
+        unitId = Vst::kRootUnitId;
+        return kResultOk;
     }
 
     //==============================================================================
@@ -968,25 +1024,8 @@ public:
     //==============================================================================
     tresult PLUGIN_API setComponentState (IBStream* stream) override
     {
-        if (! MessageManager::existsAndIsCurrentThread())
-       #if JUCE_LINUX || JUCE_BSD
-        {
-            tresult result = kResultOk;
-            WaitableEvent finishedEvent;
-
-            MessageManager::callAsync ([&]
-            {
-                result = setComponentState (stream);
-                finishedEvent.signal();
-            });
-
-            finishedEvent.wait();
-            return result;
-        }
-       #else
         // As an IEditController member, the host should only call this from the message thread.
-        jassertfalse;
-       #endif
+        assertHostMessageThread();
 
         if (auto* pluginInstance = getPluginInstance())
         {
@@ -1036,14 +1075,15 @@ public:
     }
 
     //==============================================================================
-    tresult PLUGIN_API getMidiControllerAssignment (Steinberg::int32 /*busIndex*/, Steinberg::int16 channel,
-                                                    Vst::CtrlNumber midiControllerNumber, Vst::ParamID& resultID) override
+    tresult PLUGIN_API getMidiControllerAssignment ([[maybe_unused]] Steinberg::int32 busIndex,
+                                                    [[maybe_unused]] Steinberg::int16 channel,
+                                                    [[maybe_unused]] Vst::CtrlNumber midiControllerNumber,
+                                                    [[maybe_unused]] Vst::ParamID& resultID) override
     {
        #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
         resultID = midiControllerToParameter[channel][midiControllerNumber];
         return kResultTrue; // Returning false makes some hosts stop asking for further MIDI Controller Assignments
        #else
-        ignoreUnused (channel, midiControllerNumber, resultID);
         return kResultFalse;
        #endif
     }
@@ -1090,18 +1130,18 @@ public:
         if (audioProcessor != nullptr)
             return audioProcessor->getUnitInfo (unitIndex, info);
 
+        jassertfalse;
         if (unitIndex == 0)
         {
             info.id             = Vst::kRootUnitId;
             info.parentUnitId   = Vst::kNoParentUnitId;
             info.programListId  = Vst::kNoProgramListId;
 
-            toString128 (info.name, TRANS("Root Unit"));
+            toString128 (info.name, TRANS ("Root Unit"));
 
             return kResultTrue;
         }
 
-        jassertfalse;
         zerostruct (info);
         return kResultFalse;
     }
@@ -1697,9 +1737,6 @@ private:
            #if JUCE_MAC
             if (getHostType().type == PluginHostType::SteinbergCubase10)
                 cubase10Workaround.reset (new Cubase10WindowResizeWorkaround (*this));
-           #else
-            if (! approximatelyEqual (editorScaleFactor, ec.lastScaleFactorReceived))
-                setContentScaleFactor (ec.lastScaleFactorReceived);
            #endif
         }
 
@@ -1747,12 +1784,24 @@ private:
             createContentWrapperComponentIfNeeded();
 
            #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+            // If the plugin was last opened at a particular scale, try to reapply that scale here.
+            // Note that we do this during attach(), rather than in JuceVST3Editor(). During the
+            // constructor, we don't have a host plugFrame, so
+            // ContentWrapperComponent::resizeHostWindow() won't do anything, and the content
+            // wrapper component will be left at the wrong size.
+            applyScaleFactor (StoredScaleFactor{}.withInternal (owner->lastScaleFactorReceived));
+
+            // Check the host scale factor *before* calling addToDesktop, so that the initial
+            // window size during addToDesktop is correct for the current platform scale factor.
+            #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
+             component->checkHostWindowScaleFactor();
+            #endif
+
             component->setOpaque (true);
             component->addToDesktop (0, (void*) systemWindow);
             component->setVisible (true);
 
             #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
-             component->checkHostWindowScaleFactor();
              component->startTimer (500);
             #endif
 
@@ -1943,34 +1992,31 @@ private:
             return kResultFalse;
         }
 
-        tresult PLUGIN_API setContentScaleFactor (Steinberg::IPlugViewContentScaleSupport::ScaleFactor factor) override
+        tresult PLUGIN_API setContentScaleFactor ([[maybe_unused]] const Steinberg::IPlugViewContentScaleSupport::ScaleFactor factor) override
         {
            #if ! JUCE_MAC
-            if (! approximatelyEqual ((float) factor, editorScaleFactor))
+            const auto scaleToApply = [&]
             {
                #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
                 // Cubase 10 only sends integer scale factors, so correct this for fractional scales
-                if (getHostType().type == PluginHostType::SteinbergCubase10)
-                {
-                    auto hostWindowScale = (Steinberg::IPlugViewContentScaleSupport::ScaleFactor) getScaleFactorForWindow ((HWND) systemWindow);
+                if (getHostType().type != PluginHostType::SteinbergCubase10)
+                    return factor;
 
-                    if (hostWindowScale > 0.0 && ! approximatelyEqual (factor, hostWindowScale))
-                        factor = hostWindowScale;
-                }
+                const auto hostWindowScale = (Steinberg::IPlugViewContentScaleSupport::ScaleFactor) getScaleFactorForWindow (static_cast<HWND> (systemWindow));
+
+                if (hostWindowScale <= 0.0 || approximatelyEqual (factor, hostWindowScale))
+                    return factor;
+
+                return hostWindowScale;
+               #else
+                return factor;
                #endif
+            }();
 
-                editorScaleFactor = (float) factor;
-
-                if (owner != nullptr)
-                    owner->lastScaleFactorReceived = editorScaleFactor;
-
-                if (component != nullptr)
-                    component->setEditorScaleFactor (editorScaleFactor);
-            }
+            applyScaleFactor (scaleFactor.withHost (scaleToApply));
 
             return kResultTrue;
            #else
-            ignoreUnused (factor);
             return kResultFalse;
            #endif
         }
@@ -2051,7 +2097,7 @@ private:
 
                     pluginEditor->setHostContext (editorHostContext.get());
                    #if ! JUCE_MAC
-                    pluginEditor->setScaleFactor (owner.editorScaleFactor);
+                    pluginEditor->setScaleFactor (owner.scaleFactor.get());
                    #endif
 
                     addAndMakeVisible (pluginEditor.get());
@@ -2182,10 +2228,10 @@ private:
            #if JUCE_WINDOWS && JUCE_WIN_PER_MONITOR_DPI_AWARE
             void checkHostWindowScaleFactor()
             {
-                auto hostWindowScale = (float) getScaleFactorForWindow ((HWND) owner.systemWindow);
+                const auto estimatedScale = (float) getScaleFactorForWindow (static_cast<HWND> (owner.systemWindow));
 
-                if (hostWindowScale > 0.0 && ! approximatelyEqual (hostWindowScale, owner.editorScaleFactor))
-                    owner.setContentScaleFactor (hostWindowScale);
+                if (estimatedScale > 0.0)
+                    owner.applyScaleFactor (owner.scaleFactor.withInternal (estimatedScale));
             }
 
             void timerCallback() override
@@ -2269,7 +2315,38 @@ private:
 
         std::unique_ptr<Cubase10WindowResizeWorkaround> cubase10Workaround;
        #else
-        float editorScaleFactor = 1.0f;
+        class StoredScaleFactor
+        {
+        public:
+            StoredScaleFactor withHost     (float x) const { return withMember (*this, &StoredScaleFactor::host,     x); }
+            StoredScaleFactor withInternal (float x) const { return withMember (*this, &StoredScaleFactor::internal, x); }
+            float get() const { return host.value_or (internal); }
+
+        private:
+            std::optional<float> host;
+            float internal = 1.0f;
+        };
+
+        void applyScaleFactor (const StoredScaleFactor newFactor)
+        {
+            const auto previous = std::exchange (scaleFactor, newFactor).get();
+
+            if (previous == scaleFactor.get())
+                return;
+
+            if (owner != nullptr)
+                owner->lastScaleFactorReceived = scaleFactor.get();
+
+            if (component != nullptr)
+            {
+               #if JUCE_LINUX || JUCE_BSD
+                const MessageManagerLock mmLock;
+               #endif
+                component->setEditorScaleFactor (scaleFactor.get());
+            }
+        }
+
+        StoredScaleFactor scaleFactor;
 
         #if JUCE_WINDOWS
          WindowsHooks hooks;
@@ -2343,16 +2420,15 @@ class JuceVST3Component : public Vst::IComponent,
 {
 public:
     JuceVST3Component (Vst::IHostApplication* h)
-        : pluginInstance (createPluginFilterOfType (AudioProcessor::wrapperType_VST3)),
+        : pluginInstance (createPluginFilterOfType (AudioProcessor::wrapperType_VST3).release()),
           host (h)
     {
         inParameterChangedCallback = false;
 
        #ifdef JucePlugin_PreferredChannelConfigurations
         short configs[][2] = { JucePlugin_PreferredChannelConfigurations };
-        const int numConfigs = numElementsInArray (configs);
+        [[maybe_unused]] const int numConfigs = numElementsInArray (configs);
 
-        ignoreUnused (numConfigs);
         jassert (numConfigs > 0 && (configs[0][0] > 0 || configs[0][1] > 0));
 
         pluginInstance->setPlayConfigDetails (configs[0][0], configs[0][1], 44100.0, 1024);
@@ -2475,26 +2551,31 @@ public:
     //==============================================================================
     tresult PLUGIN_API setActive (TBool state) override
     {
-        active = (state != 0);
+        const auto willBeActive = (state != 0);
 
-        if (! state)
+        active = false;
+        // Some hosts may call setBusArrangements in response to calls made during prepareToPlay
+        // or releaseResources. Specifically, Wavelab 11.1 calls setBusArrangements in the same
+        // call stack when the AudioProcessor calls setLatencySamples inside prepareToPlay.
+        // In order for setBusArrangements to return successfully, the plugin must not be activated
+        // until after prepareToPlay has completely finished.
+        const ScopeGuard scope { [&] { active = willBeActive; } };
+
+        if (willBeActive)
         {
-            getPluginInstance().releaseResources();
+            const auto sampleRate = processSetup.sampleRate > 0.0
+                                  ? processSetup.sampleRate
+                                  : getPluginInstance().getSampleRate();
+
+            const auto bufferSize = processSetup.maxSamplesPerBlock > 0
+                                  ? (int) processSetup.maxSamplesPerBlock
+                                  : getPluginInstance().getBlockSize();
+
+            preparePlugin (sampleRate, bufferSize, CallPrepareToPlay::yes);
         }
         else
         {
-            auto sampleRate = getPluginInstance().getSampleRate();
-            auto bufferSize = getPluginInstance().getBlockSize();
-
-            sampleRate = processSetup.sampleRate > 0.0
-                            ? processSetup.sampleRate
-                            : sampleRate;
-
-            bufferSize = processSetup.maxSamplesPerBlock > 0
-                            ? (int) processSetup.maxSamplesPerBlock
-                            : bufferSize;
-
-            preparePlugin (sampleRate, bufferSize, CallPrepareToPlay::yes);
+            getPluginInstance().releaseResources();
         }
 
         return kResultOk;
@@ -2776,7 +2857,7 @@ public:
     {
         // The VST3 spec requires that this function is called from the UI thread.
         // If this assertion fires, your host is misbehaving!
-        JUCE_ASSERT_MESSAGE_THREAD
+        assertHostMessageThread();
 
         if (state == nullptr)
             return kInvalidArgument;
@@ -3130,14 +3211,20 @@ public:
 
                 const auto countChannels = [] (auto& range)
                 {
-                    return std::accumulate (range.begin(), range.end(), (short) 0, [] (auto acc, auto set)
+                    return std::accumulate (range.begin(), range.end(), 0, [] (auto acc, auto set)
                     {
                         return acc + set.size();
                     });
                 };
 
-                const ChannelPair requested { countChannels (desiredLayout.inputBuses),
-                                              countChannels (desiredLayout.outputBuses) };
+                const auto toShort = [] (int x)
+                {
+                    jassert (0 <= x && x <= std::numeric_limits<short>::max());
+                    return (short) x;
+                };
+
+                const ChannelPair requested { toShort (countChannels (desiredLayout.inputBuses)),
+                                              toShort (countChannels (desiredLayout.outputBuses)) };
                 const ChannelPair configs[] = { JucePlugin_PreferredChannelConfigurations };
                 return std::find (std::begin (configs), std::end (configs), requested) != std::end (configs);
                #else
@@ -3198,25 +3285,54 @@ public:
         if (numIns > numInputBuses || numOuts > numOutputBuses)
             return false;
 
-        auto requested = pluginInstance->getBusesLayout();
+        // see the following documentation to understand the correct way to react to this callback
+        // https://steinbergmedia.github.io/vst3_doc/vstinterfaces/classSteinberg_1_1Vst_1_1IAudioProcessor.html#ad3bc7bac3fd3b194122669be2a1ecc42
 
-        for (int i = 0; i < numIns; ++i)
-            requested.getChannelSet (true,  i) = getChannelSetForSpeakerArrangement (inputs[i]);
+        const auto requestedLayout = [&]
+        {
+            auto result = pluginInstance->getBusesLayout();
 
-        for (int i = 0; i < numOuts; ++i)
-            requested.getChannelSet (false, i) = getChannelSetForSpeakerArrangement (outputs[i]);
+            for (int i = 0; i < numIns; ++i)
+                result.getChannelSet (true,  i) = getChannelSetForSpeakerArrangement (inputs[i]);
+
+            for (int i = 0; i < numOuts; ++i)
+                result.getChannelSet (false, i) = getChannelSetForSpeakerArrangement (outputs[i]);
+
+            return result;
+        }();
 
        #ifdef JucePlugin_PreferredChannelConfigurations
         short configs[][2] = { JucePlugin_PreferredChannelConfigurations };
-        if (! AudioProcessor::containsLayout (requested, configs))
+        if (! AudioProcessor::containsLayout (requestedLayout, configs))
             return kResultFalse;
        #endif
 
-        if (! pluginInstance->setBusesLayoutWithoutEnabling (requested))
-            return kResultFalse;
+        if (pluginInstance->checkBusesLayoutSupported (requestedLayout))
+        {
+            if (! pluginInstance->setBusesLayoutWithoutEnabling (requestedLayout))
+                return kResultFalse;
 
-        bufferMapper.updateFromProcessor (*pluginInstance);
-        return kResultTrue;
+            bufferMapper.updateFromProcessor (*pluginInstance);
+            return kResultTrue;
+        }
+
+        // apply layout changes in reverse order as Steinberg says we should prioritize main buses
+        const auto nextBest = [this, numInputBuses, numOutputBuses, &requestedLayout]
+        {
+            auto layout = pluginInstance->getBusesLayout();
+
+            for (auto busIdx = jmax (numInputBuses, numOutputBuses) - 1; busIdx >= 0; --busIdx)
+                for (const auto isInput : { true, false })
+                    if (auto* bus = pluginInstance->getBus (isInput, busIdx))
+                        bus->isLayoutSupported (requestedLayout.getChannelSet (isInput, busIdx), &layout);
+
+            return layout;
+        }();
+
+        if (pluginInstance->setBusesLayoutWithoutEnabling (nextBest))
+            bufferMapper.updateFromProcessor (*pluginInstance);
+
+        return kResultFalse;
     }
 
     tresult PLUGIN_API getBusArrangement (Vst::BusDirection dir, Steinberg::int32 index, Vst::SpeakerArrangement& arr) override
@@ -3289,30 +3405,44 @@ public:
     {
         jassert (pluginInstance != nullptr);
 
-        auto numParamsChanged = paramChanges.getParameterCount();
+        struct ParamChangeInfo
+        {
+            Steinberg::int32 offsetSamples = 0;
+            double value = 0.0;
+        };
+
+        const auto getPointFromQueue = [] (Steinberg::Vst::IParamValueQueue* queue, Steinberg::int32 index)
+        {
+            ParamChangeInfo result;
+            return queue->getPoint (index, result.offsetSamples, result.value) == kResultTrue
+                   ? makeOptional (result)
+                   : nullopt;
+        };
+
+        const auto numParamsChanged = paramChanges.getParameterCount();
 
         for (Steinberg::int32 i = 0; i < numParamsChanged; ++i)
         {
             if (auto* paramQueue = paramChanges.getParameterData (i))
             {
-                auto numPoints = paramQueue->getPointCount();
+                const auto vstParamID = paramQueue->getParameterId();
+                const auto numPoints  = paramQueue->getPointCount();
 
-                Steinberg::int32 offsetSamples = 0;
-                double value = 0.0;
-
-                if (paramQueue->getPoint (numPoints - 1, offsetSamples, value) == kResultTrue)
+               #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
+                if (juceVST3EditController != nullptr && juceVST3EditController->isMidiControllerParamID (vstParamID))
                 {
-                    auto vstParamID = paramQueue->getParameterId();
-
-                   #if JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS
-                    if (juceVST3EditController != nullptr && juceVST3EditController->isMidiControllerParamID (vstParamID))
-                        addParameterChangeToMidiBuffer (offsetSamples, vstParamID, value);
-                    else
-                   #endif
+                    for (Steinberg::int32 point = 0; point < numPoints; ++point)
                     {
-                        if (auto* param = comPluginInstance->getParamForVSTParamID (vstParamID))
-                            setValueAndNotifyIfChanged (*param, (float) value);
+                        if (const auto change = getPointFromQueue (paramQueue, point))
+                            addParameterChangeToMidiBuffer (change->offsetSamples, vstParamID, change->value);
                     }
+                }
+                else
+               #endif
+                if (const auto change = getPointFromQueue (paramQueue, numPoints - 1))
+                {
+                    if (auto* param = comPluginInstance->getParamForVSTParamID (vstParamID))
+                        setValueAndNotifyIfChanged (*param, (float) change->value);
                 }
             }
         }
@@ -3646,7 +3776,7 @@ DEF_CLASS_IID (JuceAudioProcessor)
  // Defined in PluginUtilities.cpp
  void getUUIDForVST2ID (bool, uint8[16]);
 
- FUID getFUIDForVST2ID (bool forControllerUID)
+ static FUID getFUIDForVST2ID (bool forControllerUID)
  {
      TUID uuid;
      getUUIDForVST2ID (forControllerUID, (uint8*) uuid);
@@ -4038,8 +4168,6 @@ using namespace juce;
 // The VST3 plugin entry point.
 extern "C" SMTG_EXPORT_SYMBOL IPluginFactory* PLUGIN_API GetPluginFactory()
 {
-    PluginHostType::jucePlugInClientCurrentWrapperType = AudioProcessor::wrapperType_VST3;
-
    #if (JUCE_MSVC || (JUCE_WINDOWS && JUCE_CLANG)) && JUCE_32BIT
     // Cunning trick to force this function to be exported. Life's too short to
     // faff around creating .def files for this kind of thing.

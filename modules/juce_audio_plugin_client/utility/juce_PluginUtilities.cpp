@@ -47,6 +47,7 @@ namespace juce
  #define VST3_REPLACEMENT_AVAILABLE 1
 
  // NB: Nasty old-fashioned code in here because it's copied from the Steinberg example code.
+ void getUUIDForVST2ID (bool forControllerUID, uint8 uuid[16]);
  void getUUIDForVST2ID (bool forControllerUID, uint8 uuid[16])
  {
      #if JUCE_MSVC
@@ -55,7 +56,7 @@ namespace juce
       const auto juce_strcat  = [] (auto&& head, auto&&... tail) { strcat_s  (head, numElementsInArray (head), tail...); };
       const auto juce_sscanf  = [] (auto&&... args)              { sscanf_s  (args...); };
      #else
-      const auto juce_sprintf = [] (auto&&... args)              { sprintf   (args...); };
+      const auto juce_sprintf = [] (auto&& head, auto&&... tail) { snprintf  (head, (size_t) numElementsInArray (head), tail...); };
       const auto juce_strcpy  = [] (auto&&... args)              { strcpy    (args...); };
       const auto juce_strcat  = [] (auto&&... args)              { strcat    (args...); };
       const auto juce_sscanf  = [] (auto&&... args)              { sscanf    (args...); };
@@ -133,7 +134,10 @@ namespace juce
 
 #if JucePlugin_Build_VST
  bool JUCE_API handleManufacturerSpecificVST2Opcode (int32 index, pointer_sized_int value, void* ptr, float);
- bool JUCE_API handleManufacturerSpecificVST2Opcode (int32 index, pointer_sized_int value, void* ptr, float)
+ bool JUCE_API handleManufacturerSpecificVST2Opcode ([[maybe_unused]] int32 index,
+                                                     [[maybe_unused]] pointer_sized_int value,
+                                                     [[maybe_unused]] void* ptr,
+                                                     float)
  {
     #if VST3_REPLACEMENT_AVAILABLE
      if ((index == (int32) ByteOrder::bigEndianInt ("stCA") || index == (int32) ByteOrder::bigEndianInt ("stCa"))
@@ -144,8 +148,6 @@ namespace juce
          ::memcpy (ptr, fuid, 16);
          return true;
      }
-    #else
-     ignoreUnused (index, value, ptr);
     #endif
      return false;
  }
