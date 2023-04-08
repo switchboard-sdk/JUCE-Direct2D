@@ -592,7 +592,7 @@ public:
         }
         ~AxisAlignedClipLayer() override = default;
 
-        virtual void pop()
+        void pop() override
         {
             deviceContext->PopAxisAlignedClip();
         }
