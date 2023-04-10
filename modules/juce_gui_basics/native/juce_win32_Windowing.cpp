@@ -1520,6 +1520,9 @@ private:
 };
 
 //==============================================================================
+
+#if JUCE_WAIT_FOR_VBLANK
+
 class VBlankDispatcher : public DeletedAtShutdown
 {
 public:
@@ -1659,6 +1662,8 @@ private:
 
 JUCE_IMPLEMENT_SINGLETON (VBlankDispatcher)
 
+#endif
+
 //==============================================================================
 class SimpleTimer  : private Timer
 {
@@ -1686,7 +1691,9 @@ private:
 
 //==============================================================================
 class HWNDComponentPeer  : public ComponentPeer,
+#if JUCE_WAIT_FOR_VBLANK
                            private VBlankListener,
+#endif
                            private Timer
                           #if JUCE_MODULE_AVAILABLE_juce_audio_plugin_client
                            , public ModifierKeyReceiver
@@ -1729,10 +1736,12 @@ public:
             return ModifierKeys::currentModifiers;
         };
 
+#if JUCE_WAIT_FOR_VBLANK
         updateCurrentMonitorAndRefreshVBlankDispatcher();
 
         if (parentToAddTo != nullptr)
             monitorUpdateTimer.emplace (1000, [this] { updateCurrentMonitorAndRefreshVBlankDispatcher(); });
+#endif
 
         suspendResumeRegistration = ScopedSuspendResumeNotificationRegistration { hwnd };
     }
@@ -1741,7 +1750,9 @@ public:
     {
         suspendResumeRegistration = {};
 
+#if JUCE_WAIT_FOR_VBLANK
         VBlankDispatcher::getInstance()->removeListener (*this);
+#endif
 
         // do this first to avoid messages arriving for this window before it's destroyed
         JuceWindowIdentifier::setAsJUCEWindow (hwnd, false);
@@ -2114,6 +2125,7 @@ public:
             DestroyCaret();
     }
 
+#if JUCE_WAIT_FOR_VBLANK
     void repaint (const Rectangle<int>& area) override
     {
         deferredRepaints.add ((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
@@ -2151,6 +2163,17 @@ public:
         vBlankListeners.call ([] (auto& l) { l.onVBlank(); });
         dispatchDeferredRepaints();
     }
+#else
+    void repaint(const Rectangle<int>& area) override
+    {
+        auto r = RECTFromRectangle(area);
+        InvalidateRect(hwnd, &r, FALSE);
+    }
+
+    void performAnyPendingRepaintsNow() override
+    {
+    }
+#endif
 
     //==============================================================================
     static HWNDComponentPeer* getOwnerOfWindow (HWND h) noexcept
@@ -3792,6 +3815,7 @@ private:
         yes
     };
 
+#if JUCE_WAIT_FOR_VBLANK
     void updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher force = ForceRefreshDispatcher::no)
     {
         auto monitor = MonitorFromWindow (hwnd, MONITOR_DEFAULTTONULL);
@@ -3799,6 +3823,7 @@ private:
         if (std::exchange (currentMonitor, monitor) != monitor || force == ForceRefreshDispatcher::yes)
             VBlankDispatcher::getInstance()->updateDisplay (*this, currentMonitor);
     }
+#endif
 
     bool handlePositionChanged()
     {
@@ -3816,7 +3841,9 @@ private:
         }
 
         handleMovedOrResized();
+#if JUCE_WAIT_FOR_VBLANK
         updateCurrentMonitorAndRefreshVBlankDispatcher();
+#endif
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
     }
@@ -3979,9 +4006,11 @@ private:
                                                                                               .getDisplayForRect (component.getScreenBounds())->userArea),
                           SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOSENDCHANGING);
 
+#if JUCE_WAIT_FOR_VBLANK
         auto* dispatcher = VBlankDispatcher::getInstance();
         dispatcher->reconfigureDisplays();
         updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher::yes);
+#endif
     }
 
     //==============================================================================
@@ -4766,7 +4795,9 @@ private:
     IMEHandler imeHandler;
     bool shouldIgnoreModalDismiss = false;
 
+#if JUCE_WAIT_FOR_VBLANK
     RectangleList<int> deferredRepaints;
+#endif
     ScopedSuspendResumeNotificationRegistration suspendResumeRegistration;
     std::optional<SimpleTimer> monitorUpdateTimer;
 
