@@ -30,7 +30,7 @@ namespace juce
                 int width = roundToInt((parentRect.right - parentRect.left) * scaleFactor_);
                 int height = roundToInt((parentRect.bottom - parentRect.top) * scaleFactor_);
 
-                hwnd = CreateWindowEx(0,
+                hwnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP,
                     className_.toWideCharPointer(),
                     nullptr,
                     WS_VISIBLE | WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
@@ -224,6 +224,12 @@ namespace juce
             ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
 
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+            juce::ComSmartPtr<IDCompositionDevice> compositionDevice;
+            juce::ComSmartPtr<IDCompositionTarget> compositionTarget;
+            juce::ComSmartPtr<IDCompositionVisual> compositionVisual;
+#endif
+
             static LRESULT CALLBACK windowProc
             (
                 HWND hwnd,
@@ -288,18 +294,29 @@ namespace juce
                                     {
                                         DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
                                         swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                                        swapChainDescription.Width = 1;
+                                        swapChainDescription.Height = 1;
                                         swapChainDescription.SampleDesc.Count = 1;
                                         swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
                                         swapChainDescription.BufferCount = bufferCount;
                                         swapChainDescription.SwapEffect = swapEffect;
                                         swapChainDescription.Scaling = dxgiScaling;
                                         swapChainDescription.Flags = swapChainFlags;
+
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+                                        hr = dxgiFactory->CreateSwapChainForComposition(direct3DDevice,
+                                            &swapChainDescription,
+                                            nullptr,
+                                            swapChain.resetAndGetPointerAddress());
+#else
                                         hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                             hwnd,
                                             &swapChainDescription,
                                             nullptr,
                                             nullptr,
                                             swapChain.resetAndGetPointerAddress());
+#endif
+
                                         if (SUCCEEDED(hr))
                                         {
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
@@ -314,6 +331,33 @@ namespace juce
                                                 hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext.resetAndGetPointerAddress());
                                             }
                                         }
+
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+                                        if (SUCCEEDED(hr))
+                                        {
+                                            hr = DCompositionCreateDevice(dxgiDevice, __uuidof(IDCompositionDevice), reinterpret_cast<void**>(compositionDevice.resetAndGetPointerAddress()));
+                                            if (SUCCEEDED(hr))
+                                            {
+                                                hr = compositionDevice->CreateTargetForHwnd(hwnd, FALSE, compositionTarget.resetAndGetPointerAddress());
+                                                if (SUCCEEDED(hr))
+                                                {
+                                                    hr = compositionDevice->CreateVisual(compositionVisual.resetAndGetPointerAddress());
+                                                    if (SUCCEEDED(hr))
+                                                    {
+                                                        hr = compositionTarget->SetRoot(compositionVisual);
+                                                        if (SUCCEEDED(hr))
+                                                        {
+                                                            hr = compositionVisual->SetContent(swapChain);
+                                                            if (SUCCEEDED(hr))
+                                                            {
+                                                                hr = compositionDevice->Commit();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+#endif
                                     }
                                 }
                             }
