@@ -271,16 +271,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         childWindow.resized();
     }
 
-    void setVisible(bool visible)
-    {
-        childWindow.setVisible(visible);
-    }
-
-    bool isVisible() const
-    {
-        return childWindow.isVisible();
-    }
-
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
     bool needsFullRepaint() const
     {
@@ -639,16 +629,6 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
 void Direct2DLowLevelGraphicsContext::resized()
 {
     pimpl->resized();
-}
-
-void Direct2DLowLevelGraphicsContext::setVisible(bool visible)
-{
-    pimpl->setVisible(visible);
-}
-
-bool Direct2DLowLevelGraphicsContext::isVisible() const 
-{
-    return pimpl->isVisible();
 }
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT

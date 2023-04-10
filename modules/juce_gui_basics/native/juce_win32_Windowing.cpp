@@ -2829,7 +2829,7 @@ private:
     void handlePaintMessage()
     {
        #if JUCE_DIRECT2D
-        if (direct2DContext != nullptr && direct2DContext->isVisible())
+        if (direct2DContext != nullptr)
         {
             handleDirect2DPaint();
         }
@@ -2887,7 +2887,6 @@ private:
             direct2DContext->start();
             handlePaint(*direct2DContext);
             direct2DContext->end();
-            ValidateRect(hwnd, nullptr);
         }
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         else
@@ -4097,6 +4096,7 @@ private:
             
             //==============================================================================
 #if JUCE_DIRECT2D
+#if 0
             case WM_ENTERSIZEMOVE:
                 if (direct2DContext)
                 {
@@ -4104,13 +4104,13 @@ private:
                     direct2DContext->setVisible(false);
                 }
                 break;
+#endif
             
             case WM_EXITSIZEMOVE:
                 if (direct2DContext)
                 {
                     direct2DContext->resized();
                     handleDirect2DPaint();
-                    direct2DContext->setVisible(true);
                 }
                 break; 
 #endif

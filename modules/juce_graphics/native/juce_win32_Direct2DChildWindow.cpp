@@ -30,9 +30,10 @@ namespace juce
                 int width = roundToInt((parentRect.right - parentRect.left) * scaleFactor_);
                 int height = roundToInt((parentRect.bottom - parentRect.top) * scaleFactor_);
 
-                hwnd = CreateWindowW(className_.toWideCharPointer(),
+                hwnd = CreateWindowEx(0,
+                    className_.toWideCharPointer(),
                     nullptr,
-                    WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
+                    WS_VISIBLE | WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
                     CW_USEDEFAULT,
                     CW_USEDEFAULT,
                     width,
@@ -42,10 +43,6 @@ namespace juce
                     moduleHandle,
                     this
                 );
-                if (hwnd)
-                {
-                    setVisible(true);
-                }
             }
 
             ~ChildWindow()
@@ -162,6 +159,8 @@ namespace juce
                     {
                         releaseDeviceContext();
                     }
+
+                    ValidateRect(hwnd, nullptr);
                 }
             }
 
@@ -173,16 +172,6 @@ namespace juce
             ID2D1SolidColorBrush* const getColourBrush() const
             {
                 return colourBrush;
-            }
-
-            void setVisible(bool visible)
-            {
-                ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
-            }
-
-            bool isVisible() const
-            {
-                return IsWindowVisible(hwnd);
             }
 
             struct Class
@@ -246,7 +235,7 @@ namespace juce
                     return 1;
 
                 case WM_PAINT:
-                    ValidateRect(hwnd, nullptr);
+                    //ValidateRect(hwnd, nullptr);
                     return 0;
                 }
 

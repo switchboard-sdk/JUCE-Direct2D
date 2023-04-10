@@ -79,9 +79,6 @@ public:
 
     void resized();
 
-    void setVisible(bool visible);
-    bool isVisible() const;
-
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
     bool needsFullRepaint() const;
 #endif
