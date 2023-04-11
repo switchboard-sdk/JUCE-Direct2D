@@ -57,8 +57,17 @@ namespace juce
                 //
                 RECT windowRect;
                 GetClientRect(parentHwnd, &windowRect);
-                auto width = roundToInt((windowRect.right - windowRect.left) * scaleFactor);
-                auto height = roundToInt((windowRect.bottom - windowRect.top) * scaleFactor);
+
+                //
+                // Resize this child window
+                //
+                auto width = windowRect.right - windowRect.left;
+                auto height = windowRect.bottom - windowRect.top;
+                width = juce::jmax(width, 1l);
+                height = juce::jmax(height, 1l);
+                MoveWindow(hwnd, 0, 0, width, height, FALSE /* repaint */);
+
+                //DBG("ChildWindow::resized " << width << " " << height);
 
                 //
                 // Resize the swap chain 
@@ -72,7 +81,9 @@ namespace juce
                 {
                     swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-                    auto hr = swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, swapChainFlags);
+                    auto scaledWidth = roundToInt(width * scaleFactor);
+                    auto scaledHeight = roundToInt(height * scaleFactor);
+                    auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
                     if (SUCCEEDED(hr))
                     {
                         createSwapChainBuffer();
@@ -82,11 +93,6 @@ namespace juce
                         releaseDeviceContext();
                     }
                 }
-
-                //
-                // Resize this child window
-                //
-                MoveWindow(hwnd, 0, 0, width, height, TRUE);
             }
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
@@ -247,7 +253,7 @@ namespace juce
                     return 1;
 
                 case WM_PAINT:
-                    //ValidateRect(hwnd, nullptr);
+                    ValidateRect(hwnd, nullptr);
                     return 0;
                 }
 
