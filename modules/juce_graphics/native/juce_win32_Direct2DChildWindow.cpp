@@ -43,6 +43,11 @@ namespace juce
                     moduleHandle,
                     this
                 );
+
+                if (hwnd)
+                {
+                    createDeviceContext();
+                }
             }
 
             ~ChildWindow()
@@ -67,8 +72,6 @@ namespace juce
                 height = juce::jmax(height, 1l);
                 MoveWindow(hwnd, 0, 0, width, height, FALSE /* repaint */);
 
-                //DBG("ChildWindow::resized " << width << " " << height);
-
                 //
                 // Resize the swap chain 
                 //
@@ -84,6 +87,7 @@ namespace juce
                     auto scaledWidth = roundToInt(width * scaleFactor);
                     auto scaledHeight = roundToInt(height * scaleFactor);
                     auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
+
                     if (SUCCEEDED(hr))
                     {
                         createSwapChainBuffer();
@@ -259,7 +263,6 @@ namespace juce
 
                 return DefWindowProcW(hwnd, message, wParam, lParam);
             }
-
 
             void createDeviceContext()
             {

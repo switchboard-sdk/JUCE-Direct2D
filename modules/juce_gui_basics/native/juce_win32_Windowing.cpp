@@ -3070,6 +3070,7 @@ private:
         else if (direct2DContext == nullptr)
         {
             direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, getPlatformScaleFactor());
+            direct2DContext->resized();
         }
     }
    #endif
@@ -3081,7 +3082,7 @@ private:
         {
             currentRenderingEngine = index == 1 ? direct2DRenderingEngine : softwareRenderingEngine;
             updateDirect2DContext();
-            repaint (component.getLocalBounds());
+            repaint(component.getLocalBounds());
         }
        #endif
     }
