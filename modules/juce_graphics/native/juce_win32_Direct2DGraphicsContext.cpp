@@ -440,9 +440,10 @@ public:
     void setOpacity (float newOpacity)
     {
         fillType.setOpacity (newOpacity);
-
-        if (currentBrush != nullptr)
-            currentBrush->SetOpacity (newOpacity);
+        if (fillType.isColour())
+        {
+            updateColourBrush();
+        }
     }
 
     void clearFill()
@@ -547,6 +548,8 @@ public:
         {
             auto colour = Direct2D::colourToD2D(fillType.colour);
             colourBrush->SetColor(colour);
+
+            colourBrush->SetOpacity(fillType.getOpacity());
         }
     }
 
@@ -793,12 +796,9 @@ void Direct2DLowLevelGraphicsContext::restoreState()
     currentState = states.getLast();
 
     //
-    // The solid color brush is shared between states, so restore the previous solid color
+    // The solid color brush is shared between states, so restore the previous solid color and opacity
     //
-    if (currentState->fillType.isColour())
-    {
-        currentState->updateColourBrush();
-    }
+    currentState->updateColourBrush();
 }
 
 void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
