@@ -1819,7 +1819,10 @@ public:
 
        #if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
+        {
             direct2DContext->resized();
+            handleDirect2DPaint();
+        }
        #endif
     }
 
@@ -2151,7 +2154,7 @@ public:
             WeakReference<Component> localRef (&component);
             MSG m;
 
-            if (isUsingUpdateLayeredWindow() || PeekMessage (&m, hwnd, WM_PAINT, WM_PAINT, PM_REMOVE))
+            if (isUsingUpdateLayeredWindow() || PeekMessage(&m, hwnd, WM_PAINT, WM_PAINT, PM_REMOVE))
                 if (localRef != nullptr) // (the PeekMessage call can dispatch messages, which may delete this comp)
                     handlePaintMessage();
         }
@@ -2637,7 +2640,7 @@ private:
         if ((styleFlags & windowHasMaximiseButton) != 0)    type |= WS_MAXIMIZEBOX;
         if ((styleFlags & windowIgnoresMouseClicks) != 0)   exstyle |= WS_EX_TRANSPARENT;
         if ((styleFlags & windowIsSemiTransparent) != 0)    exstyle |= WS_EX_LAYERED;
-
+        
         hwnd = CreateWindowEx (exstyle, WindowClassHolder::getInstance()->getWindowClassName(),
                                L"", type, 0, 0, 0, 0, parentToAddTo, nullptr,
                                (HINSTANCE) Process::getCurrentModuleInstanceHandle(), nullptr);
@@ -2717,10 +2720,10 @@ private:
 
         if (IsWindow (hwnd))
         {
-            RevokeDragDrop (hwnd);
+            RevokeDragDrop(hwnd);
 
             // NB: we need to do this before DestroyWindow() as child HWNDs will be invalid after
-            EnumChildWindows (hwnd, revokeChildDragDropCallback, 0);
+            EnumChildWindows(hwnd, revokeChildDragDropCallback, 0);
 
             DestroyWindow (hwnd);
         }
@@ -2887,6 +2890,7 @@ private:
             direct2DContext->start();
             handlePaint(*direct2DContext);
             direct2DContext->end();
+            ValidateRect(hwnd, nullptr); // xxx not sure this is needed?
         }
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         else
@@ -3844,6 +3848,14 @@ private:
         updateCurrentMonitorAndRefreshVBlankDispatcher();
 #endif
 
+#if JUCE_DIRECT2D
+        if (direct2DContext)
+        {
+            direct2DContext->resized();
+            handleDirect2DPaint();
+        }
+#endif
+
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
     }
 
@@ -4095,32 +4107,19 @@ private:
 
             
             //==============================================================================
-#if JUCE_DIRECT2D
-#if 0
-            case WM_ENTERSIZEMOVE:
-                if (direct2DContext)
-                {
-                    paintImmediateGDI();
-                    direct2DContext->setVisible(false);
-                }
-                break;
-#endif
-            
-            case WM_EXITSIZEMOVE:
-                if (direct2DContext)
-                {
-                    direct2DContext->resized();
-                    handleDirect2DPaint();
-                }
-                break; 
-#endif
 
             case WM_PAINT:
                 handlePaintMessage();
                 return 0;
 
             case WM_NCPAINT:
-                handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+#if JUCE_DIRECT2D
+                if (direct2DContext == nullptr)
+#endif
+                {
+                    handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+                }
+                
 
                 if (hasTitleBar())
                     break; // let the DefWindowProc handle drawing the frame.
@@ -4192,7 +4191,7 @@ private:
                 break;
 
             //==============================================================================
-            case WM_SIZING:                  return handleSizeConstraining (*(RECT*) lParam, wParam);
+            case WM_SIZING:                  return handleSizeConstraining(*(RECT*)lParam, wParam);
             case WM_WINDOWPOSCHANGING:       return handlePositionChanging (*(WINDOWPOS*) lParam);
             case 0x2e0: /* WM_DPICHANGED */  return handleDPIChanging ((int) HIWORD (wParam), *(RECT*) lParam);
 
