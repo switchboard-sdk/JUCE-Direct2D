@@ -30,9 +30,10 @@ namespace juce
                 int width = roundToInt((parentRect.right - parentRect.left) * scaleFactor_);
                 int height = roundToInt((parentRect.bottom - parentRect.top) * scaleFactor_);
 
-                hwnd = CreateWindowW(className_.toWideCharPointer(),
+                hwnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP,
+                    className_.toWideCharPointer(),
                     nullptr,
-                    WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
+                    WS_VISIBLE | WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
                     CW_USEDEFAULT,
                     CW_USEDEFAULT,
                     width,
@@ -42,10 +43,6 @@ namespace juce
                     moduleHandle,
                     this
                 );
-                if (hwnd)
-                {
-                    setVisible(true);
-                }
             }
 
             ~ChildWindow()
@@ -123,6 +120,7 @@ namespace juce
 
                     if (SUCCEEDED(hr))
                     {
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
                         if (updateRect != nullptr && allBuffersPresented)
                         {
                             RECT dirtyRectangle
@@ -143,6 +141,7 @@ namespace juce
                             hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                         }
                         else
+#endif
                         {
                             hr = swapChain->Present(presentSyncInterval, presentFlags);
 
@@ -150,11 +149,13 @@ namespace juce
                             // Every buffer in the swap chain needs to be presented without dirty rectangles once
                             // before calling Present1 with dirty rectangles
                             // 
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
                             if (!allBuffersPresented)
                             {
                                 ++numPresentedBuffers;
                                 allBuffersPresented = numPresentedBuffers >= bufferCount;
                             }
+#endif
                         }
                     }
 
@@ -162,6 +163,8 @@ namespace juce
                     {
                         releaseDeviceContext();
                     }
+
+                    ValidateRect(hwnd, nullptr);
                 }
             }
 
@@ -173,16 +176,6 @@ namespace juce
             ID2D1SolidColorBrush* const getColourBrush() const
             {
                 return colourBrush;
-            }
-
-            void setVisible(bool visible)
-            {
-                ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
-            }
-
-            bool isVisible() const
-            {
-                return IsWindowVisible(hwnd);
             }
 
             struct Class
@@ -220,14 +213,22 @@ namespace juce
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
             bool allBuffersPresented = false;
             UINT numPresentedBuffers = 0;
+#endif
             HWND hwnd = nullptr;
             SharedResourcePointer<Direct2DFactories> factories;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
             ComSmartPtr<IDXGISwapChain1> swapChain;
             ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
+
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+            juce::ComSmartPtr<IDCompositionDevice> compositionDevice;
+            juce::ComSmartPtr<IDCompositionTarget> compositionTarget;
+            juce::ComSmartPtr<IDCompositionVisual> compositionVisual;
+#endif
 
             static LRESULT CALLBACK windowProc
             (
@@ -246,7 +247,7 @@ namespace juce
                     return 1;
 
                 case WM_PAINT:
-                    ValidateRect(hwnd, nullptr);
+                    //ValidateRect(hwnd, nullptr);
                     return 0;
                 }
 
@@ -293,22 +294,35 @@ namespace juce
                                     {
                                         DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
                                         swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                                        swapChainDescription.Width = 1;
+                                        swapChainDescription.Height = 1;
                                         swapChainDescription.SampleDesc.Count = 1;
                                         swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
                                         swapChainDescription.BufferCount = bufferCount;
                                         swapChainDescription.SwapEffect = swapEffect;
                                         swapChainDescription.Scaling = dxgiScaling;
                                         swapChainDescription.Flags = swapChainFlags;
+
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+                                        hr = dxgiFactory->CreateSwapChainForComposition(direct3DDevice,
+                                            &swapChainDescription,
+                                            nullptr,
+                                            swapChain.resetAndGetPointerAddress());
+#else
                                         hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
                                             hwnd,
                                             &swapChainDescription,
                                             nullptr,
                                             nullptr,
                                             swapChain.resetAndGetPointerAddress());
+#endif
+
                                         if (SUCCEEDED(hr))
                                         {
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
                                             allBuffersPresented = false;
                                             numPresentedBuffers = 0;
+#endif
 
                                             ComSmartPtr<ID2D1Device> direct2DDevice;
                                             hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
@@ -317,6 +331,33 @@ namespace juce
                                                 hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext.resetAndGetPointerAddress());
                                             }
                                         }
+
+#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
+                                        if (SUCCEEDED(hr))
+                                        {
+                                            hr = DCompositionCreateDevice(dxgiDevice, __uuidof(IDCompositionDevice), reinterpret_cast<void**>(compositionDevice.resetAndGetPointerAddress()));
+                                            if (SUCCEEDED(hr))
+                                            {
+                                                hr = compositionDevice->CreateTargetForHwnd(hwnd, FALSE, compositionTarget.resetAndGetPointerAddress());
+                                                if (SUCCEEDED(hr))
+                                                {
+                                                    hr = compositionDevice->CreateVisual(compositionVisual.resetAndGetPointerAddress());
+                                                    if (SUCCEEDED(hr))
+                                                    {
+                                                        hr = compositionTarget->SetRoot(compositionVisual);
+                                                        if (SUCCEEDED(hr))
+                                                        {
+                                                            hr = compositionVisual->SetContent(swapChain);
+                                                            if (SUCCEEDED(hr))
+                                                            {
+                                                                hr = compositionDevice->Commit();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+#endif
                                     }
                                 }
                             }
@@ -339,8 +380,10 @@ namespace juce
                 swapChain = nullptr;
                 deviceContext = nullptr;
 
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
                 allBuffersPresented = false;
                 numPresentedBuffers = 0;
+#endif
             }
 
             void createSwapChainBuffer()

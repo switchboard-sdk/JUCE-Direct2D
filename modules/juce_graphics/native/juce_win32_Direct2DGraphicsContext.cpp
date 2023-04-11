@@ -174,7 +174,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_FLIP_MODE
-        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_NONE, tearingSupported_, scaleFactor_)
+        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_DISCARD, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #else
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #endif
@@ -269,16 +269,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
     void resized()
     {
         childWindow.resized();
-    }
-
-    void setVisible(bool visible)
-    {
-        childWindow.setVisible(visible);
-    }
-
-    bool isVisible() const
-    {
-        return childWindow.isVisible();
     }
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
@@ -639,16 +629,6 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
 void Direct2DLowLevelGraphicsContext::resized()
 {
     pimpl->resized();
-}
-
-void Direct2DLowLevelGraphicsContext::setVisible(bool visible)
-{
-    pimpl->setVisible(visible);
-}
-
-bool Direct2DLowLevelGraphicsContext::isVisible() const 
-{
-    return pimpl->isVisible();
 }
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
