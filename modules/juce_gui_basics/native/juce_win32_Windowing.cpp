@@ -3070,7 +3070,6 @@ private:
         else if (direct2DContext == nullptr)
         {
             direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, getPlatformScaleFactor());
-            direct2DContext->resized();
         }
     }
    #endif

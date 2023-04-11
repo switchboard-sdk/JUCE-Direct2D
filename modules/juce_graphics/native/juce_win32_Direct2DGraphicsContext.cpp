@@ -622,6 +622,7 @@ Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, do
     : currentState (nullptr),
       pimpl (new Pimpl(hwnd_, scaleFactor_, Direct2D::isTearingSupported()))
 {
+    resized();
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
