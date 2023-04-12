@@ -15,7 +15,11 @@ namespace juce
                 dxgiScaling(dxgiScaling_),
                 scaleFactor(scaleFactor_),
                 swapChainFlags(0/*DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING*/),
+#if JUCE_WAIT_FOR_VBLANK
+                presentSyncInterval(0),
+#else
                 presentSyncInterval(1),
+#endif
                 presentFlags(0/*DXGI_PRESENT_ALLOW_TEARING*/)
 
 //                 swapChainFlags(tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
