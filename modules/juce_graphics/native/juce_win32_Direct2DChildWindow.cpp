@@ -413,14 +413,6 @@ namespace juce
                         bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
                         hr = deviceContext->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
                         jassert(SUCCEEDED(hr));
-#if 0 // xxx how to handle DPI scaling for Windows 8?
-                        if (SUCCEEDED(hr))
-                        {
-                            UINT GetDpiForWindow(HWND hwnd);
-                            auto dpi = GetDpiForWindow(hwnd);
-                            renderingTarget->SetDpi((float)dpi, (float)dpi);
-                        }
-#endif
                     }
                 }
             }
