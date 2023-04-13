@@ -941,9 +941,8 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
     {
         auto hScale = currentState->font.getHorizontalScale();
 
-        deviceContext->SetTransform(Direct2D::transformToMatrix(AffineTransform::scale(hScale, 1.0f)
-            .followedBy(transform)
-            .followedBy(currentState->currentTransform.getTransform())));
+        auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
+        deviceContext->SetTransform(Direct2D::transformToMatrix(scaledTransform.followedBy(currentState->currentTransform.getTransform())));
 
         const auto glyphIndices = (UINT16)glyphNumber;
         const auto glyphAdvances = 0.0f;
@@ -959,8 +958,17 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
         glyphRun.isSideways = FALSE;
         glyphRun.bidiLevel = 0;
 
+        //
+        // The gradient brushes are position-dependent, so need to undo the device context transform
+        //
+        D2D1::Matrix3x2F brushTransform;
+        currentState->currentBrush->GetTransform(&brushTransform);
+        currentState->currentBrush->SetTransform(Direct2D::transformToMatrix(scaledTransform.inverted()));
+
         deviceContext->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
+
         deviceContext->SetTransform(D2D1::IdentityMatrix());
+        currentState->currentBrush->SetTransform(brushTransform);
     }
 }
 
