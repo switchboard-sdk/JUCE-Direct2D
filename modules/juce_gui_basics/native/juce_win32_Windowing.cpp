@@ -2889,8 +2889,8 @@ private:
             handlePaint(*direct2DContext);
             direct2DContext->end(&logicalUpdateRect);
         }
-#else
         else
+#else
         {
             //
             // Paint the whole window
