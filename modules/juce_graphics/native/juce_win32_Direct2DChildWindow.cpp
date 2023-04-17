@@ -103,13 +103,6 @@ namespace juce
                 }
             }
 
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-            bool needsFullRender() const
-            {
-                return !allBuffersPresented;
-            }
-#endif
-
             void startRender()
             {
                 createDeviceContext();
@@ -135,7 +128,7 @@ namespace juce
                     if (SUCCEEDED(hr))
                     {
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
-                        if (updateRect != nullptr && allBuffersPresented)
+                        if (updateRect != nullptr && !updateRect->isEmpty())
                         {
                             RECT dirtyRectangle
                             {
@@ -153,23 +146,21 @@ namespace juce
                             };
 
                             hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                            if (SUCCEEDED(hr))
+                            {
+                                ValidateRect(hwnd, &dirtyRectangle);
+                            }
+                            else if (DXGI_ERROR_INVALID_CALL == hr)
+                            {
+                                hr = swapChain->Present(presentSyncInterval, presentFlags);
+                                ValidateRect(hwnd, nullptr);
+                            }
                         }
                         else
 #endif
                         {
                             hr = swapChain->Present(presentSyncInterval, presentFlags);
-
-                            //
-                            // Every buffer in the swap chain needs to be presented without dirty rectangles once
-                            // before calling Present1 with dirty rectangles
-                            // 
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-                            if (!allBuffersPresented)
-                            {
-                                ++numPresentedBuffers;
-                                allBuffersPresented = numPresentedBuffers >= bufferCount;
-                            }
-#endif
+                            ValidateRect(hwnd, nullptr);
                         }
                     }
 
@@ -177,8 +168,6 @@ namespace juce
                     {
                         releaseDeviceContext();
                     }
-
-                    ValidateRect(hwnd, nullptr);
                 }
             }
 
@@ -227,10 +216,6 @@ namespace juce
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-            bool allBuffersPresented = false;
-            UINT numPresentedBuffers = 0;
-#endif
             HWND hwnd = nullptr;
             SharedResourcePointer<Direct2DFactories> factories;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
@@ -332,11 +317,6 @@ namespace juce
 
                                         if (SUCCEEDED(hr))
                                         {
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-                                            allBuffersPresented = false;
-                                            numPresentedBuffers = 0;
-#endif
-
                                             ComSmartPtr<ID2D1Device> direct2DDevice;
                                             hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                             if (SUCCEEDED(hr))
@@ -392,11 +372,6 @@ namespace juce
                 swapChainBuffer = nullptr;
                 swapChain = nullptr;
                 deviceContext = nullptr;
-
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-                allBuffersPresented = false;
-                numPresentedBuffers = 0;
-#endif
             }
 
             void createSwapChainBuffer()

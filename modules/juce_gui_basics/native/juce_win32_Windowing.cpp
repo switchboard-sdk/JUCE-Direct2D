@@ -2876,13 +2876,21 @@ private:
     {
         jassert(direct2DContext);
 
-        //
-        // The Direct2D context may need to have the whole window painted 
-        // regardless of the update region
-        //
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
-        if (direct2DContext->needsFullRepaint())
-#endif
+        //
+        // Paint the update region
+        //
+        RECT physicalScreenUpdateRect;
+        if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
+        {
+            auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
+            direct2DContext->start();
+            direct2DContext->clipToRectangle(logicalUpdateRect);
+            handlePaint(*direct2DContext);
+            direct2DContext->end(&logicalUpdateRect);
+        }
+#else
+        else
         {
             //
             // Paint the whole window
@@ -2890,24 +2898,6 @@ private:
             direct2DContext->start();
             handlePaint(*direct2DContext);
             direct2DContext->end();
-            ValidateRect(hwnd, nullptr); // xxx not sure this is needed?
-        }
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-        else
-        {
-            //
-            // Paint the update region
-            //
-            RECT physicalScreenUpdateRect;
-            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
-            {
-                auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
-                direct2DContext->start();
-                direct2DContext->clipToRectangle(logicalUpdateRect);
-                handlePaint(*direct2DContext);
-                direct2DContext->end(&logicalUpdateRect);
-                ValidateRect(hwnd, &physicalScreenUpdateRect);
-            }
         }
 #endif
     }

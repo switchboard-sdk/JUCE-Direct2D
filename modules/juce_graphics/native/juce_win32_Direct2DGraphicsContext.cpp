@@ -174,7 +174,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_FLIP_MODE
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
+        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
+#else
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_DISCARD, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
+#endif
 #else
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #endif
@@ -265,18 +269,10 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return childWindow.getColourBrush();
     }
 
-
     void resized()
     {
         childWindow.resized();
     }
-
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-    bool needsFullRepaint() const
-    {
-        return childWindow.needsFullRender();
-    }
-#endif
 
     void startRender()
     {
@@ -634,13 +630,6 @@ void Direct2DLowLevelGraphicsContext::resized()
 {
     pimpl->resized();
 }
-
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-bool Direct2DLowLevelGraphicsContext::needsFullRepaint() const
-{
-    return pimpl->needsFullRepaint();
-}
-#endif
 
 void Direct2DLowLevelGraphicsContext::start()
 {

@@ -79,9 +79,6 @@ public:
 
     void resized();
 
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-    bool needsFullRepaint() const;
-#endif
     void start();
     void end(Rectangle<int>* updateRect = nullptr);
 
