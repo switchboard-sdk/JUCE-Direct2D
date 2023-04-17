@@ -2897,7 +2897,7 @@ private:
             direct2DContext->end(&logicalUpdateRect);
         }
         else
-#else
+#endif
         {
             //
             // Paint the whole window
@@ -2906,7 +2906,6 @@ private:
             handlePaint(*direct2DContext);
             direct2DContext->end();
         }
-#endif
     }
 
     void paintImmediateGDI()
