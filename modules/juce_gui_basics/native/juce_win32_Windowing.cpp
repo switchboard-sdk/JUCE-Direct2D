@@ -2640,6 +2640,13 @@ private:
         if ((styleFlags & windowHasMaximiseButton) != 0)    type |= WS_MAXIMIZEBOX;
         if ((styleFlags & windowIgnoresMouseClicks) != 0)   exstyle |= WS_EX_TRANSPARENT;
         if ((styleFlags & windowIsSemiTransparent) != 0)    exstyle |= WS_EX_LAYERED;
+
+#if JUCE_DIRECT2D
+        if (direct2DContext)
+        {
+            exstyle |= WS_EX_NOREDIRECTIONBITMAP;
+        }
+#endif
         
         hwnd = CreateWindowEx (exstyle, WindowClassHolder::getInstance()->getWindowClassName(),
                                L"", type, 0, 0, 0, 0, parentToAddTo, nullptr,
@@ -3053,14 +3060,22 @@ private:
    #if JUCE_DIRECT2D
     void updateDirect2DContext()
     {
+        auto exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+
         if (currentRenderingEngine != direct2DRenderingEngine)
         {
             direct2DContext = nullptr;
+
+            exStyle &= ~WS_EX_NOREDIRECTIONBITMAP;
         }
         else if (direct2DContext == nullptr)
         {
             direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, getPlatformScaleFactor());
+
+            exStyle |= WS_EX_NOREDIRECTIONBITMAP;
         }
+
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
     }
    #endif
 
