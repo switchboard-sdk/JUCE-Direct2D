@@ -2887,25 +2887,28 @@ private:
         //
         // Paint the update region
         //
-        RECT physicalScreenUpdateRect;
-        if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
         {
-            auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
-            direct2DContext->start();
-            direct2DContext->clipToRectangle(logicalUpdateRect);
-            handlePaint(*direct2DContext);
-            direct2DContext->end(&logicalUpdateRect);
+            RECT physicalScreenUpdateRect;
+            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
+            {
+                auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
+                direct2DContext->start();
+                direct2DContext->clipToRectangle(logicalUpdateRect);
+                handlePaint(*direct2DContext);
+                direct2DContext->end(&logicalUpdateRect);
+                ValidateRect(hwnd, &physicalScreenUpdateRect);
+                return;
+            }
         }
-        else
 #endif
-        {
-            //
-            // Paint the whole window
-            //
-            direct2DContext->start();
-            handlePaint(*direct2DContext);
-            direct2DContext->end();
-        }
+
+        //
+        // Paint the whole window
+        //
+        direct2DContext->start();
+        handlePaint(*direct2DContext);
+        direct2DContext->end();
+        ValidateRect(hwnd, nullptr);
     }
 
     void paintImmediateGDI()
