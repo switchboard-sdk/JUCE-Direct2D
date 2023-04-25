@@ -173,14 +173,10 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         hwnd(hwnd_),
         scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
-#if JUCE_DIRECT2D_FLIP_MODE
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #else
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_DISCARD, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
-#endif
-#else
-        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_DISCARD, 1, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #endif
     {
     }
