@@ -119,6 +119,8 @@ namespace juce
 
             void finishRender(Rectangle<int>* updateRect)
             {
+                ignoreUnused(updateRect);
+
                 if (deviceContext != nullptr && swapChain != nullptr)
                 {
                     auto hr = deviceContext->EndDraw();
