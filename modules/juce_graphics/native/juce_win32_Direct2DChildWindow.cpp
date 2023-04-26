@@ -59,6 +59,19 @@ namespace juce
                 DestroyWindow(hwnd);
             }
 
+            void setScaleFactor(double scaleFactor_)
+            {
+                scaleFactor = scaleFactor_;
+
+                updateDeviceContextDPI();
+                resized();
+            }
+
+            double getScaleFactor() const
+            {
+                return scaleFactor;
+            }
+
             void resized()
             {
                 //
@@ -324,6 +337,10 @@ namespace juce
                                             if (SUCCEEDED(hr))
                                             {
                                                 hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext.resetAndGetPointerAddress());
+                                                if (SUCCEEDED(hr))
+                                                {
+                                                    updateDeviceContextDPI();
+                                                }
                                             }
                                         }
 
@@ -394,6 +411,15 @@ namespace juce
                 }
             }
 
+            void updateDeviceContextDPI()
+            {
+                if (deviceContext)
+                {
+                    float windowsDefaultDPI = 96.0f;
+                    float scaledDPI = windowsDefaultDPI * (float)scaleFactor;
+                    deviceContext->SetDpi(scaledDPI, scaledDPI);
+                }
+            }
         };
 
     } // namespace Direct2D

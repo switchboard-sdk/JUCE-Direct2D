@@ -171,7 +171,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_, double scaleFactor_, bool tearingSupported_) :
         hwnd(hwnd_),
-        scaleFactor(scaleFactor_),
         tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
@@ -282,19 +281,18 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     void setScaleFactor(double scale_)
     {
-        scaleFactor = scale_;
+        childWindow.setScaleFactor(scale_);
     }
 
     double getScaleFactor() const
     {
-        return scaleFactor;
+        return childWindow.getScaleFactor();
     }
 
     SharedResourcePointer<Direct2DFactories> factories;
 
 private:
     HWND hwnd = nullptr;
-    double scaleFactor = 1.0;
     bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
     Direct2D::ChildWindow childWindow;
@@ -329,12 +327,6 @@ public:
                 clipRegion.setSize(size.width, size.height);
             }
             setFill(FillType(Colours::black));
-
-            //
-            // Set initial currentTransform to scale for DPI
-            //
-            auto scaleFactor = (float)owner.getScaleFactor();
-            currentTransform.addTransform(AffineTransform::scale(scaleFactor, scaleFactor));
         }
     }
 
