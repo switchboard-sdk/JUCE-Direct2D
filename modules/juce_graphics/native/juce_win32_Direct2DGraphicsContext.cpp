@@ -145,7 +145,6 @@ namespace juce
             // Rather than create the 1.5 factory interface directly, we create the 1.4
             // interface and query for the 1.5 interface. This will enable the graphics
             // debugging tools which might not support the 1.5 factory interface.
-#if 0
             ComSmartPtr<IDXGIFactory4> factory4;
             auto hr = CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)factory4.resetAndGetPointerAddress());
             if (SUCCEEDED(hr))
@@ -158,7 +157,6 @@ namespace juce
                     return SUCCEEDED(hr) && allowTearing;
                 }
             }
-#endif
 
             return false;
         }
