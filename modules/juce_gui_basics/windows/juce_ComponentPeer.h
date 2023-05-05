@@ -542,6 +542,10 @@ public:
     /** Returns the style requested for this app. */
     Style getAppStyle() const { return style; }
 
+    StatisticsAccumulator<double> const& getPaintDurationSeconds() const noexcept { return paintDurationSeconds; }
+    StatisticsAccumulator<double> const& getPaintIntervalSeconds() const noexcept { return paintIntervalSeconds; }
+
+
 protected:
     //==============================================================================
     static void forceDisplayUpdate();
@@ -554,6 +558,10 @@ protected:
     ListenerList<ScaleFactorListener> scaleFactorListeners;
     ListenerList<VBlankListener> vBlankListeners;
     Style style = Style::automatic;
+
+    StatisticsAccumulator<double> paintDurationSeconds;
+    StatisticsAccumulator<double> paintIntervalSeconds;
+    int64 lastPaintStartTicks = Time::getHighResolutionTicks();
 
 private:
     //==============================================================================
