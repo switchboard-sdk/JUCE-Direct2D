@@ -2838,23 +2838,25 @@ private:
     //==============================================================================
     void handlePaintMessage()
     {
-       #if JUCE_DIRECT2D
+        auto startPaintTicks = juce::Time::getHighResolutionTicks();
+
+#if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
             handleDirect2DPaint();
         }
         else
-       #endif
+#endif
         {
             HRGN rgn = CreateRectRgn(0, 0, 0, 0);
             const int regionType = GetUpdateRgn(hwnd, rgn, false);
 
             PAINTSTRUCT paintStruct;
             HDC dc = BeginPaint(hwnd, &paintStruct); // Note this can immediately generate a WM_NCPAINT
-                                                      // message and become re-entrant, but that's OK
+            // message and become re-entrant, but that's OK
 
-            // if something in a paint handler calls, e.g. a message box, this can become reentrant and
-            // corrupt the image it's using to paint into, so do a check here.
+// if something in a paint handler calls, e.g. a message box, this can become reentrant and
+// corrupt the image it's using to paint into, so do a check here.
             static bool reentrant = false;
 
             if (!reentrant)
@@ -2873,9 +2875,15 @@ private:
 #if JUCE_MSVC
             _fpreset(); // because some graphics cards can unmask FP exceptions
 #endif
+
+            lastPaintTime = Time::getMillisecondCounter();
         }
 
-        lastPaintTime = Time::getMillisecondCounter();
+        auto finishPaintTicks = juce::Time::getHighResolutionTicks();
+
+        paintDurationSeconds.addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
+        paintIntervalSeconds.addValue(Time::highResolutionTicksToSeconds(startPaintTicks - lastPaintStartTicks));
+        lastPaintStartTicks = startPaintTicks;
     }
 
 #if JUCE_DIRECT2D
@@ -2909,30 +2917,6 @@ private:
         handlePaint(*direct2DContext);
         direct2DContext->end();
         ValidateRect(hwnd, nullptr);
-    }
-
-    void paintImmediateGDI()
-    {
-        auto clientRect = getWindowClientRect(hwnd);
-        auto width = clientRect.right - clientRect.left;
-        auto height = clientRect.bottom - clientRect.top;
-
-        auto rgn = CreateRectRgn(0, 0, width, height);
-        if (rgn != nullptr)
-        {
-            auto dc = GetDC(hwnd);
-            if (dc != nullptr)
-            {
-                PAINTSTRUCT paintStruct = {};
-                paintStruct.hdc = dc;
-                paintStruct.fErase = TRUE;
-                paintStruct.rcPaint = { 0, 0, width, height };
-                performPaint(dc, rgn, SIMPLEREGION, paintStruct);
-
-                ReleaseDC(hwnd, dc);
-            }
-            DeleteObject(rgn);
-        }
     }
 #endif
 
