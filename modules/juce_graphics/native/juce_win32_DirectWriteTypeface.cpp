@@ -90,7 +90,7 @@ public:
 #else
                 options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
 #endif
-                d2d1CreateFactory (D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof (ID2D1Factory1), &options,
+                d2d1CreateFactory (D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof (ID2D1Factory1), &options,
                                    (void**) d2dFactory.resetAndGetPointerAddress());
             }
         }
