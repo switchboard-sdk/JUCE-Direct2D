@@ -169,7 +169,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_, double scaleFactor_, bool tearingSupported_) :
         hwnd(hwnd_),
-        tearingSupported(tearingSupported_),
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
 #else
@@ -291,7 +290,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
-    bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
     Direct2D::ChildWindow childWindow;
 };
