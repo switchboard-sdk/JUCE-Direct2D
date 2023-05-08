@@ -515,7 +515,7 @@ bool TextLayout::createNativeLayout ([[maybe_unused]] const AttributedString& te
 
     SharedResourcePointer<Direct2DFactories> factories;
 
-    if (factories->d2dFactory != nullptr
+    if (factories->d2dSharedFactory != nullptr
         && factories->directWriteFactory != nullptr
         && factories->systemFonts != nullptr
         && factories->directWriteRenderTarget != nullptr)

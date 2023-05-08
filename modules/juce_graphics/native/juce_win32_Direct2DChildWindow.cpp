@@ -8,7 +8,14 @@ namespace juce
         class ChildWindow
         {
         public:
-            ChildWindow(String className_, HWND parentHwnd_, DXGI_SWAP_EFFECT swapEffect_, UINT bufferCount_, DXGI_SCALING dxgiScaling_, bool tearingSupported, double scaleFactor_) :
+            ChildWindow(ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory_,
+                String className_, 
+                HWND parentHwnd_, 
+                DXGI_SWAP_EFFECT swapEffect_, 
+                UINT bufferCount_, 
+                DXGI_SCALING dxgiScaling_, 
+                bool tearingSupported, 
+                double scaleFactor_) :
                 parentHwnd(parentHwnd_),
                 swapEffect(swapEffect_),
                 bufferCount(bufferCount_),
@@ -16,7 +23,8 @@ namespace juce
                 scaleFactor(scaleFactor_),
                 swapChainFlags(tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
                 presentSyncInterval(tearingSupported ? 0 : 1),
-                presentFlags(tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0)
+                presentFlags(tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0),
+                d2dDedicatedFactory(d2dDedicatedFactory_)
             {
                 HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
 
@@ -224,7 +232,7 @@ namespace juce
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
             HWND hwnd = nullptr;
-            SharedResourcePointer<Direct2DFactories> factories;
+            ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
             ComSmartPtr<IDXGISwapChain1> swapChain;
             ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
@@ -262,7 +270,7 @@ namespace juce
 
             void createDeviceContext()
             {
-                if (factories->d2dFactory != nullptr)
+                if (d2dDedicatedFactory != nullptr)
                 {
                     if (deviceContext == nullptr)
                     {
@@ -325,10 +333,10 @@ namespace juce
                                         if (SUCCEEDED(hr))
                                         {
                                             ComSmartPtr<ID2D1Device> direct2DDevice;
-                                            hr = factories->d2dFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
+                                            hr = d2dDedicatedFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                             if (SUCCEEDED(hr))
                                             {
-                                                hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, deviceContext.resetAndGetPointerAddress());
+                                                hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, deviceContext.resetAndGetPointerAddress());
                                                 if (SUCCEEDED(hr))
                                                 {
                                                     updateDeviceContextDPI();
