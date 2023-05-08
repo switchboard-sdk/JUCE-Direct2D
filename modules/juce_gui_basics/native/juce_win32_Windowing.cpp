@@ -2900,12 +2900,15 @@ private:
             if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
             {
                 auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
-                direct2DContext->start();
-                direct2DContext->clipToRectangle(logicalUpdateRect);
-                handlePaint(*direct2DContext);
-                direct2DContext->end(&logicalUpdateRect);
-                ValidateRect(hwnd, &physicalScreenUpdateRect);
-                return;
+                if (direct2DContext->canPartiallyRepaint(logicalUpdateRect))
+                {
+                    direct2DContext->start();
+                    direct2DContext->clipToRectangle(logicalUpdateRect);
+                    handlePaint(*direct2DContext);
+                    direct2DContext->end(&logicalUpdateRect);
+                    ValidateRect(hwnd, &physicalScreenUpdateRect);
+                    return;
+                }
             }
         }
 #endif

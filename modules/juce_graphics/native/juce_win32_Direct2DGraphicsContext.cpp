@@ -299,6 +299,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         childWindow->finishRender(updateRect);
     }
 
+    bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const
+    {
+        return childWindow->canPartiallyRepaint(partialRepaintArea);
+    }
+
     void setScaleFactor(double scale_)
     {
         childWindow->setScaleFactor(scale_);
@@ -994,6 +999,11 @@ void Direct2DLowLevelGraphicsContext::setScaleFactor(double scale_)
 double Direct2DLowLevelGraphicsContext::getScaleFactor() const
 {
     return pimpl->getScaleFactor();
+}
+
+bool Direct2DLowLevelGraphicsContext::canPartiallyRepaint(Rectangle<int> partialRepaintArea) const
+{
+    return pimpl->canPartiallyRepaint(partialRepaintArea);
 }
 
 } // namespace juce

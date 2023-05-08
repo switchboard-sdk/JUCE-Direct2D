@@ -85,8 +85,8 @@ namespace juce
                 //
                 auto width = windowRect.right - windowRect.left;
                 auto height = windowRect.bottom - windowRect.top;
-                width = juce::jmax(width, 1l);
-                height = juce::jmax(height, 1l);
+                width = jmax(width, 1l);
+                height = jmax(height, 1l);
                 MoveWindow(hwnd, 0, 0, width, height, FALSE /* repaint */);
 
                 //
@@ -104,6 +104,7 @@ namespace juce
                     auto scaledWidth = roundToInt(width * scaleFactor);
                     auto scaledHeight = roundToInt(height * scaleFactor);
                     auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
+                    partialRepaintReady = false;
 
                     if (SUCCEEDED(hr))
                     {
@@ -114,6 +115,15 @@ namespace juce
                         releaseDeviceContext();
                     }
                 }
+            }
+
+            bool canPartiallyRepaint(Rectangle<int> partialRepaintArea)
+            {
+                RECT windowRect;
+                GetClientRect(hwnd, &windowRect);
+
+                return partialRepaintReady && 
+                    Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom).contains(partialRepaintArea);
             }
 
             void startRender()
@@ -160,6 +170,8 @@ namespace juce
                                 nullptr
                             };
 
+                            jassert(partialRepaintReady);
+
                             hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                             if (SUCCEEDED(hr))
                             {
@@ -175,6 +187,8 @@ namespace juce
 #endif
                         {
                             hr = swapChain->Present(presentSyncInterval, presentFlags);
+                            partialRepaintReady = true;
+
                             ValidateRect(hwnd, nullptr);
                         }
                     }
@@ -232,6 +246,7 @@ namespace juce
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
             HWND hwnd = nullptr;
+            bool partialRepaintReady = false;
             ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
             ComSmartPtr<IDXGISwapChain1> swapChain;
@@ -239,9 +254,9 @@ namespace juce
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
 
 #if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
-            juce::ComSmartPtr<IDCompositionDevice> compositionDevice;
-            juce::ComSmartPtr<IDCompositionTarget> compositionTarget;
-            juce::ComSmartPtr<IDCompositionVisual> compositionVisual;
+            ComSmartPtr<IDCompositionDevice> compositionDevice;
+            ComSmartPtr<IDCompositionTarget> compositionTarget;
+            ComSmartPtr<IDCompositionVisual> compositionVisual;
 #endif
 
             static LRESULT CALLBACK windowProc
@@ -329,6 +344,7 @@ namespace juce
                                             nullptr,
                                             swapChain.resetAndGetPointerAddress());
 #endif
+                                        partialRepaintReady = false;
 
                                         if (SUCCEEDED(hr))
                                         {
@@ -391,6 +407,7 @@ namespace juce
                 swapChainBuffer = nullptr;
                 swapChain = nullptr;
                 deviceContext = nullptr;
+                partialRepaintReady = false;
             }
 
             void createSwapChainBuffer()

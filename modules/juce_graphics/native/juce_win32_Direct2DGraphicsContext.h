@@ -85,6 +85,8 @@ public:
     void setScaleFactor(double scale_);
     double getScaleFactor() const;
 
+    bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const;
+
     //==============================================================================
 private:
     struct SavedState;
