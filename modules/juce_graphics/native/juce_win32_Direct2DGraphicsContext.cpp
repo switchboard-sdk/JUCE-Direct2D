@@ -168,14 +168,36 @@ namespace juce
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
     Pimpl(HWND hwnd_, double scaleFactor_, bool tearingSupported_) :
-        hwnd(hwnd_),
-        tearingSupported(tearingSupported_),
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
-#else
-        childWindow(childWindowClass.className, hwnd_, DXGI_SWAP_EFFECT_FLIP_DISCARD, 2, DXGI_SCALING_STRETCH, tearingSupported_, scaleFactor_)
-#endif
+        hwnd(hwnd_)
     {
+#if JUCE_DEBUG
+        D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_INFORMATION };
+#else
+        D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_NONE };
+#endif
+
+        auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
+        jassertquiet(SUCCEEDED(hr));
+
+#if JUCE_DIRECT2D_PARTIAL_REPAINT
+        childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
+            childWindowClass.className, 
+            hwnd_, 
+            DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 
+            2, 
+            DXGI_SCALING_STRETCH, 
+            tearingSupported_, 
+            scaleFactor_);
+#else
+        childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
+            childWindowClass.className,
+            hwnd_, 
+            DXGI_SWAP_EFFECT_FLIP_DISCARD, 
+            2, 
+            DXGI_SCALING_STRETCH, 
+            tearingSupported_, 
+            scaleFactor_);
+#endif
     }
 
     //
@@ -212,7 +234,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ScopedGeometryWithSink objects{ factories->d2dFactory, fillMode };
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
 
         if (objects.sink != nullptr)
         {
@@ -225,7 +247,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
     {
-        ScopedGeometryWithSink objects{ factories->d2dFactory, fillMode };
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
 
         if (objects.sink != nullptr)
         {
@@ -240,7 +262,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ComSmartPtr<ID2D1Geometry> pathToPathGeometry (const Path& path, const AffineTransform& transform)
     {
-        ScopedGeometryWithSink objects{ factories->d2dFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
 
         if (objects.sink != nullptr)
         {
@@ -254,46 +276,46 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return childWindow.getDeviceContext();
+        return childWindow->getDeviceContext();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return childWindow.getColourBrush();
+        return childWindow->getColourBrush();
     }
 
     void resized()
     {
-        childWindow.resized();
+        childWindow->resized();
     }
 
     void startRender()
     {
-        childWindow.startRender();
+        childWindow->startRender();
     }
 
     void finishRender(Rectangle<int>* updateRect)
     {
-        childWindow.finishRender(updateRect);
+        childWindow->finishRender(updateRect);
     }
 
     void setScaleFactor(double scale_)
     {
-        childWindow.setScaleFactor(scale_);
+        childWindow->setScaleFactor(scale_);
     }
 
     double getScaleFactor() const
     {
-        return childWindow.getScaleFactor();
+        return childWindow->getScaleFactor();
     }
 
-    SharedResourcePointer<Direct2DFactories> factories;
+    SharedResourcePointer<Direct2DFactories> sharedFactories;
+    ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
 
 private:
     HWND hwnd = nullptr;
-    bool const tearingSupported;
     Direct2D::ChildWindow::Class childWindowClass;
-    Direct2D::ChildWindow childWindow;
+    std::unique_ptr<Direct2D::ChildWindow> childWindow;
 };
 
 //==============================================================================
@@ -955,8 +977,8 @@ bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& te
 
         DirectWriteTypeLayout::drawToD2DContext(text, area,
             *(deviceContext),
-            *(pimpl->factories->directWriteFactory),
-            *(pimpl->factories->systemFonts));
+            *(pimpl->sharedFactories->directWriteFactory),
+            *(pimpl->sharedFactories->systemFonts));
 
         deviceContext->SetTransform(D2D1::IdentityMatrix());
     }

@@ -91,7 +91,7 @@ public:
                 options.debugLevel = D2D1_DEBUG_LEVEL_NONE;
 #endif
                 d2d1CreateFactory (D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof (ID2D1Factory1), &options,
-                                   (void**) d2dFactory.resetAndGetPointerAddress());
+                                   (void**) d2dSharedFactory.resetAndGetPointerAddress());
             }
         }
 
@@ -111,7 +111,7 @@ public:
                 }
             }
 
-            if (d2dFactory != nullptr)
+            if (d2dSharedFactory != nullptr)
             {
                 auto d2dRTProp = D2D1::RenderTargetProperties (D2D1_RENDER_TARGET_TYPE_SOFTWARE,
                                                                D2D1::PixelFormat (DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -120,7 +120,7 @@ public:
                                                                D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE,
                                                                D2D1_FEATURE_LEVEL_DEFAULT);
 
-                d2dFactory->CreateDCRenderTarget (&d2dRTProp, directWriteRenderTarget.resetAndGetPointerAddress());
+                d2dSharedFactory->CreateDCRenderTarget (&d2dRTProp, directWriteRenderTarget.resetAndGetPointerAddress());
             }
         }
 
@@ -144,7 +144,7 @@ public:
             customFontCollectionLoaders.clear();
         }
 #endif
-        d2dFactory = nullptr;  // (need to make sure these are released before deleting the DynamicLibrary objects)
+        d2dSharedFactory = nullptr;  // (need to make sure these are released before deleting the DynamicLibrary objects)
         directWriteFactory = nullptr;
         systemFonts = nullptr;
         directWriteRenderTarget = nullptr;
@@ -197,7 +197,7 @@ public:
     }
 #endif
 
-    ComSmartPtr<ID2D1Factory1> d2dFactory;
+    ComSmartPtr<ID2D1Factory1> d2dSharedFactory;
     ComSmartPtr<IDWriteFactory> directWriteFactory;
     ComSmartPtr<IDWriteFontCollection> systemFonts;
 #if JUCE_DIRECT2D
