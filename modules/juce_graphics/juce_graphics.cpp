@@ -66,7 +66,7 @@
      your version of the Windows SDK to the latest one. The DirectWrite and Direct2D
      headers are in the version 8 SDKs.
   */
-  #include <d2d1_1.h>
+  #include <d2d1_2.h>
   #include <d3d11_1.h>
   #include <dwrite.h>
   #include <dxgi1_5.h>

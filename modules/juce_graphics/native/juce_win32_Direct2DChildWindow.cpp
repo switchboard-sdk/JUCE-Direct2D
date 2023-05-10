@@ -9,14 +9,13 @@ namespace juce
         {
         public:
             ChildWindow(ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory_,
-                String className_, 
-                HWND parentHwnd_, 
+                HWND windowHandle_, 
                 DXGI_SWAP_EFFECT swapEffect_, 
                 UINT bufferCount_, 
                 DXGI_SCALING dxgiScaling_, 
                 bool tearingSupported, 
                 double scaleFactor_) :
-                parentHwnd(parentHwnd_),
+                windowHandle(windowHandle_),
                 swapEffect(swapEffect_),
                 bufferCount(bufferCount_),
                 dxgiScaling(dxgiScaling_),
@@ -26,37 +25,11 @@ namespace juce
                 presentFlags(tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0),
                 d2dDedicatedFactory(d2dDedicatedFactory_)
             {
-                HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
-
-                RECT parentRect;
-                GetClientRect(parentHwnd_, &parentRect);
-
-                int width = roundToInt((parentRect.right - parentRect.left) * scaleFactor_);
-                int height = roundToInt((parentRect.bottom - parentRect.top) * scaleFactor_);
-
-                hwnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP,
-                    className_.toWideCharPointer(),
-                    nullptr,
-                    WS_VISIBLE | WS_CHILD | WS_DISABLED, // Specify WS_DISABLED to pass input events to parent window
-                    CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    width,
-                    height,
-                    parentHwnd_,
-                    nullptr,
-                    moduleHandle,
-                    this
-                );
-
-                if (hwnd)
-                {
-                    createDeviceContext();
-                }
+                createDeviceContext();
             }
 
             ~ChildWindow()
             {
-                DestroyWindow(hwnd);
             }
 
             void setScaleFactor(double scaleFactor_)
@@ -75,19 +48,18 @@ namespace juce
             void resized()
             {
                 //
-                // Get the size of the parent window
+                // Get the size of the window
                 //
                 RECT windowRect;
-                GetClientRect(parentHwnd, &windowRect);
+                GetClientRect(windowHandle, &windowRect);
 
                 //
-                // Resize this child window
+                // Get the width & height from the client area; make sure width and height are at least 1
                 //
                 auto width = windowRect.right - windowRect.left;
                 auto height = windowRect.bottom - windowRect.top;
                 width = jmax(width, 1l);
                 height = jmax(height, 1l);
-                MoveWindow(hwnd, 0, 0, width, height, FALSE /* repaint */);
 
                 //
                 // Resize the swap chain 
@@ -120,7 +92,7 @@ namespace juce
             bool canPartiallyRepaint(Rectangle<int> partialRepaintArea)
             {
                 RECT windowRect;
-                GetClientRect(hwnd, &windowRect);
+                GetClientRect(windowHandle, &windowRect);
 
                 return partialRepaintReady && 
                     Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom).contains(partialRepaintArea);
@@ -175,12 +147,12 @@ namespace juce
                             hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                             if (SUCCEEDED(hr))
                             {
-                                ValidateRect(hwnd, &dirtyRectangle);
+                                ValidateRect(windowHandle, &dirtyRectangle);
                             }
                             else if (DXGI_ERROR_INVALID_CALL == hr)
                             {
                                 hr = swapChain->Present(presentSyncInterval, presentFlags);
-                                ValidateRect(hwnd, nullptr);
+                                ValidateRect(windowHandle, nullptr);
                             }
                         }
                         else
@@ -189,7 +161,7 @@ namespace juce
                             hr = swapChain->Present(presentSyncInterval, presentFlags);
                             partialRepaintReady = true;
 
-                            ValidateRect(hwnd, nullptr);
+                            ValidateRect(windowHandle, nullptr);
                         }
                     }
 
@@ -210,34 +182,8 @@ namespace juce
                 return colourBrush;
             }
 
-            struct Class
-            {
-                Class()
-                {
-                    HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
-                    WNDCLASSEXW wcex = { sizeof(WNDCLASSEX) };
-                    wcex.style = CS_HREDRAW | CS_VREDRAW;
-                    wcex.lpfnWndProc = windowProc;
-                    wcex.cbClsExtra = 0;
-                    wcex.cbWndExtra = sizeof(LONG_PTR);
-                    wcex.hInstance = moduleHandle;
-                    wcex.hbrBackground = nullptr;
-                    wcex.lpszMenuName = nullptr;
-                    wcex.lpszClassName = className.toWideCharPointer();
-                    RegisterClassExW(&wcex);
-                }
-
-                ~Class()
-                {
-                    HMODULE moduleHandle = (HMODULE)Process::getCurrentModuleInstanceHandle();
-                    UnregisterClassW(className.toWideCharPointer(), moduleHandle);
-                }
-
-                String const className{ "JUCE_Direct2D_" + String::toHexString(Time::getHighResolutionTicks()) };
-            };
-
         private:
-            HWND const parentHwnd;
+            HWND const windowHandle;
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
             DXGI_SCALING const dxgiScaling;
@@ -245,43 +191,15 @@ namespace juce
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
-            HWND hwnd = nullptr;
             bool partialRepaintReady = false;
             ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory;
             ComSmartPtr<ID2D1DeviceContext> deviceContext;
             ComSmartPtr<IDXGISwapChain1> swapChain;
             ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
             ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
-
-#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
             ComSmartPtr<IDCompositionDevice> compositionDevice;
             ComSmartPtr<IDCompositionTarget> compositionTarget;
             ComSmartPtr<IDCompositionVisual> compositionVisual;
-#endif
-
-            static LRESULT CALLBACK windowProc
-            (
-                HWND hwnd,
-                UINT message,
-                WPARAM wParam,
-                LPARAM lParam
-            )
-            {
-                switch (message)
-                {
-                case WM_CREATE:
-                    return 0;
-
-                case WM_ERASEBKGND:
-                    return 1;
-
-                case WM_PAINT:
-                    ValidateRect(hwnd, nullptr);
-                    return 0;
-                }
-
-                return DefWindowProcW(hwnd, message, wParam, lParam);
-            }
 
             void createDeviceContext()
             {
@@ -331,19 +249,11 @@ namespace juce
                                         swapChainDescription.Scaling = dxgiScaling;
                                         swapChainDescription.Flags = swapChainFlags;
 
-#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
                                         hr = dxgiFactory->CreateSwapChainForComposition(direct3DDevice,
                                             &swapChainDescription,
                                             nullptr,
                                             swapChain.resetAndGetPointerAddress());
-#else
-                                        hr = dxgiFactory->CreateSwapChainForHwnd(direct3DDevice,
-                                            hwnd,
-                                            &swapChainDescription,
-                                            nullptr,
-                                            nullptr,
-                                            swapChain.resetAndGetPointerAddress());
-#endif
+
                                         partialRepaintReady = false;
 
                                         if (SUCCEEDED(hr))
@@ -360,13 +270,12 @@ namespace juce
                                             }
                                         }
 
-#if JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
                                         if (SUCCEEDED(hr))
                                         {
                                             hr = DCompositionCreateDevice(dxgiDevice, __uuidof(IDCompositionDevice), reinterpret_cast<void**>(compositionDevice.resetAndGetPointerAddress()));
                                             if (SUCCEEDED(hr))
                                             {
-                                                hr = compositionDevice->CreateTargetForHwnd(hwnd, FALSE, compositionTarget.resetAndGetPointerAddress());
+                                                hr = compositionDevice->CreateTargetForHwnd(windowHandle, FALSE, compositionTarget.resetAndGetPointerAddress());
                                                 if (SUCCEEDED(hr))
                                                 {
                                                     hr = compositionDevice->CreateVisual(compositionVisual.resetAndGetPointerAddress());
@@ -385,7 +294,6 @@ namespace juce
                                                 }
                                             }
                                         }
-#endif
                                     }
                                 }
                             }

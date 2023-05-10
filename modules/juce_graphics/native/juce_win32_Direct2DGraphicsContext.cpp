@@ -181,7 +181,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
         childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
-            childWindowClass.className, 
             hwnd_, 
             DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 
             2, 
@@ -190,7 +189,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             scaleFactor_);
 #else
         childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
-            childWindowClass.className,
             hwnd_, 
             DXGI_SWAP_EFFECT_FLIP_DISCARD, 
             2, 
@@ -319,7 +317,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
-    Direct2D::ChildWindow::Class childWindowClass;
     std::unique_ptr<Direct2D::ChildWindow> childWindow;
 };
 

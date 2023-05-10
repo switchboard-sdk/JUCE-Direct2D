@@ -103,10 +103,6 @@
 #define JUCE_WAIT_FOR_VBLANK 1
 #endif
 
-#ifndef JUCE_DIRECT2D_USE_DIRECT_COMPOSITION
-#define JUCE_DIRECT2D_USE_DIRECT_COMPOSITION 1
-#endif
-
 //==============================================================================
 namespace juce
 {
