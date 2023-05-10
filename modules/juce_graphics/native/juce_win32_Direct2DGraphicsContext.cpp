@@ -180,7 +180,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         jassertquiet(SUCCEEDED(hr));
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
-        childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
+        renderTarget = std::make_unique<Direct2D::RenderTarget>(d2dDedicatedFactory,
             hwnd_, 
             DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 
             2, 
@@ -188,7 +188,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             tearingSupported_, 
             scaleFactor_);
 #else
-        childWindow = std::make_unique<Direct2D::ChildWindow>(d2dDedicatedFactory,
+        renderTarget = std::make_unique<Direct2D::RenderTarget>(d2dDedicatedFactory,
             hwnd_, 
             DXGI_SWAP_EFFECT_FLIP_DISCARD, 
             2, 
@@ -274,42 +274,42 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return childWindow->getDeviceContext();
+        return renderTarget->getDeviceContext();
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
     {
-        return childWindow->getColourBrush();
+        return renderTarget->getColourBrush();
     }
 
     void resized()
     {
-        childWindow->resized();
+        renderTarget->resized();
     }
 
     void startRender()
     {
-        childWindow->startRender();
+        renderTarget->startRender();
     }
 
     void finishRender(Rectangle<int>* updateRect)
     {
-        childWindow->finishRender(updateRect);
+        renderTarget->finishRender(updateRect);
     }
 
     bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const
     {
-        return childWindow->canPartiallyRepaint(partialRepaintArea);
+        return renderTarget->canPartiallyRepaint(partialRepaintArea);
     }
 
     void setScaleFactor(double scale_)
     {
-        childWindow->setScaleFactor(scale_);
+        renderTarget->setScaleFactor(scale_);
     }
 
     double getScaleFactor() const
     {
-        return childWindow->getScaleFactor();
+        return renderTarget->getScaleFactor();
     }
 
     SharedResourcePointer<Direct2DFactories> sharedFactories;
@@ -317,7 +317,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
 private:
     HWND hwnd = nullptr;
-    std::unique_ptr<Direct2D::ChildWindow> childWindow;
+    std::unique_ptr<Direct2D::RenderTarget> renderTarget;
 };
 
 //==============================================================================

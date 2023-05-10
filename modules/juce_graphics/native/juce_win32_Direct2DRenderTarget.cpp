@@ -5,10 +5,10 @@ namespace juce
     namespace Direct2D
     {
 
-        class ChildWindow
+        class RenderTarget
         {
         public:
-            ChildWindow(ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory_,
+            RenderTarget(ComSmartPtr< ID2D1Factory1> d2dDedicatedFactory_,
                 HWND windowHandle_, 
                 DXGI_SWAP_EFFECT swapEffect_, 
                 UINT bufferCount_, 
@@ -28,7 +28,7 @@ namespace juce
                 createDeviceContext();
             }
 
-            ~ChildWindow()
+            ~RenderTarget()
             {
             }
 
