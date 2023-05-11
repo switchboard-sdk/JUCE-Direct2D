@@ -2897,7 +2897,7 @@ private:
         //
         {
             RECT physicalScreenUpdateRect;
-            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
+            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))-
             {
                 auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
                 if (direct2DContext->canPartiallyRepaint(logicalUpdateRect))
@@ -3842,11 +3842,11 @@ private:
 #endif
 
 #if JUCE_DIRECT2D
-            if (direct2DContext)
-            {
-                direct2DContext->resized();
-                handleDirect2DPaint();
-            }
+        if (direct2DContext)
+        {
+            direct2DContext->resized();
+            handleDirect2DPaint();
+        }
 #endif
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
@@ -4107,14 +4107,10 @@ private:
 
             case WM_NCPAINT:
 #if JUCE_DIRECT2D
-            {
-                juce::ScopedLock locker{ direct2DLock };
-
                 if (direct2DContext != nullptr)
                 {
                     handlePaintMessage();
                 }
-            }
 #else
                 handlePaintMessage();
 #endif
