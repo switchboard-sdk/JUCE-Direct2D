@@ -437,6 +437,8 @@ public:
     virtual StringArray getAvailableRenderingEngines() = 0;
     virtual int getCurrentRenderingEngine() const;
     virtual void setCurrentRenderingEngine (int index);
+    virtual LowLevelGraphicsContext* const getLowLevelGraphicsContext() noexcept { return nullptr; }
+    virtual CriticalSection* getLock() noexcept { return nullptr; };
 
     //==============================================================================
     /** On desktop platforms this method will check all the mouse and key states and return
