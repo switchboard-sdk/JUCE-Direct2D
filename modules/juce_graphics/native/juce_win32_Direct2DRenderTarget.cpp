@@ -13,13 +13,11 @@ namespace juce
                 DXGI_SWAP_EFFECT swapEffect_, 
                 UINT bufferCount_, 
                 DXGI_SCALING dxgiScaling_, 
-                bool tearingSupported, 
-                double scaleFactor_) :
+                bool tearingSupported) :
                 windowHandle(windowHandle_),
                 swapEffect(swapEffect_),
                 bufferCount(bufferCount_),
                 dxgiScaling(dxgiScaling_),
-                scaleFactor(scaleFactor_),
                 swapChainFlags(tearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
                 presentSyncInterval(tearingSupported ? 0 : 1),
                 presentFlags(tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0),
@@ -34,7 +32,7 @@ namespace juce
 
             void setScaleFactor(double scaleFactor_)
             {
-                scaleFactor = scaleFactor_;
+                dpiScalingFactor = scaleFactor_;
 
                 updateDeviceContextDPI();
                 resized();
@@ -42,7 +40,7 @@ namespace juce
 
             double getScaleFactor() const
             {
-                return scaleFactor;
+                return dpiScalingFactor;
             }
 
             void resized()
@@ -73,8 +71,8 @@ namespace juce
                 {
                     swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-                    auto scaledWidth = roundToInt(width * scaleFactor);
-                    auto scaledHeight = roundToInt(height * scaleFactor);
+                    auto scaledWidth = roundToInt(width * dpiScalingFactor);
+                    auto scaledHeight = roundToInt(height * dpiScalingFactor);
                     auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
                     partialRepaintReady = false;
 
@@ -187,7 +185,7 @@ namespace juce
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
             DXGI_SCALING const dxgiScaling;
-            double scaleFactor;
+            double dpiScalingFactor = 1.0;
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
@@ -341,7 +339,7 @@ namespace juce
                 if (deviceContext)
                 {
                     float windowsDefaultDPI = 96.0f;
-                    float scaledDPI = windowsDefaultDPI * (float)scaleFactor;
+                    float scaledDPI = windowsDefaultDPI * (float)dpiScalingFactor;
                     deviceContext->SetDpi(scaledDPI, scaledDPI);
                 }
             }

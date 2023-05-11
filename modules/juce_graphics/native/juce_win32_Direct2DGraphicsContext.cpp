@@ -167,7 +167,7 @@ namespace juce
 
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    Pimpl(HWND hwnd_, double scaleFactor_, bool tearingSupported_) :
+    Pimpl(HWND hwnd_, bool tearingSupported_) :
         hwnd(hwnd_)
     {
 #if JUCE_DEBUG
@@ -185,16 +185,14 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 
             2, 
             DXGI_SCALING_STRETCH, 
-            tearingSupported_, 
-            scaleFactor_);
+            tearingSupported_);
 #else
         renderTarget = std::make_unique<Direct2D::RenderTarget>(d2dDedicatedFactory,
             hwnd_, 
             DXGI_SWAP_EFFECT_FLIP_DISCARD, 
             2, 
             DXGI_SCALING_STRETCH, 
-            tearingSupported_, 
-            scaleFactor_);
+            tearingSupported_);
 #endif
     }
 
@@ -624,9 +622,9 @@ public:
 };
 
 //==============================================================================
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, double scaleFactor_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, scaleFactor_, Direct2D::isTearingSupported()))
+      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported()))
 {
     resized();
 }

@@ -34,7 +34,7 @@ typedef HWND__* HWND;
 class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext
 {
 public:
-    Direct2DLowLevelGraphicsContext(HWND, double scaleFactor_);
+    Direct2DLowLevelGraphicsContext(HWND);
     ~Direct2DLowLevelGraphicsContext();
 
     //==============================================================================
