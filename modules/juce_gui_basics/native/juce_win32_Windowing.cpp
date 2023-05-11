@@ -1711,11 +1711,7 @@ public:
         : ComponentPeer (comp, windowStyleFlags),
           dontRepaint (nonRepainting),
           parentToAddTo (parent),
-#if JUCE_DIRECT2D
-          currentRenderingEngine(direct2DRenderingEngine)
-#else
           currentRenderingEngine (softwareRenderingEngine)
-#endif
     {
         callFunctionIfNotLocked (&createWindowCallback, this);
 
@@ -1772,12 +1768,9 @@ public:
             dropTarget = nullptr;
         }
 
-       #if JUCE_DIRECT2D
-        {
-            ScopedLock locker{ direct2DLock };
-            direct2DContext = nullptr;
-        }
-       #endif
+        #if JUCE_DIRECT2D
+        direct2DContext = nullptr;
+        #endif
     }
 
     //==============================================================================
@@ -1820,17 +1813,13 @@ public:
                                             roundToInt ((info.rcWindow.bottom - info.rcClient.bottom) / scaleFactor),
                                             roundToInt ((info.rcWindow.right  - info.rcClient.right)  / scaleFactor));
 
-       #if JUCE_DIRECT2D
+        #if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
         {
-            ScopedLock locker{ direct2DLock };
-
-            if (direct2DContext != nullptr)
-            {
-                direct2DContext->resized();
-                handleDirect2DPaint();
-            }
+            direct2DContext->resized();
+            handleDirect2DPaint();
         }
-       #endif
+        #endif
     }
 
     void setBounds (const Rectangle<int>& bounds, bool isNowFullScreen) override
@@ -2418,7 +2407,6 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
-    CriticalSection direct2DLock;
    #endif
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
@@ -2849,8 +2837,6 @@ private:
         auto startPaintTicks = juce::Time::getHighResolutionTicks();
 
 #if JUCE_DIRECT2D
-        ScopedLock locker{ direct2DLock };
-
         if (direct2DContext != nullptr)
         {
             handleDirect2DPaint();
@@ -2899,8 +2885,6 @@ private:
 #if JUCE_DIRECT2D
     void handleDirect2DPaint()
     {
-        ScopedLock locker{ direct2DLock };
-
         jassert(direct2DContext);
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
@@ -3061,8 +3045,6 @@ private:
    #if JUCE_DIRECT2D
     void updateDirect2DContext()
     {
-        ScopedLock locker{ direct2DLock };
-
         auto exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
         if (currentRenderingEngine != direct2DRenderingEngine)
@@ -3093,18 +3075,6 @@ private:
         }
        #endif
     }
-
-#if JUCE_DIRECT2D
-    LowLevelGraphicsContext* const getLowLevelGraphicsContext() noexcept override
-    {
-        return direct2DContext.get();
-    }
-
-    CriticalSection* getLock() noexcept override
-    {
-        return &direct2DLock;
-    }
-#endif
 
     static uint32 getMinTimeBetweenMouseMoves()
     {
@@ -3869,14 +3839,10 @@ private:
 #endif
 
 #if JUCE_DIRECT2D
+        if (direct2DContext)
         {
-            ScopedLock locker{ direct2DLock };
-
-            if (direct2DContext)
-            {
-                direct2DContext->resized();
-                handleDirect2DPaint();
-            }
+            direct2DContext->resized();
+            handleDirect2DPaint();
         }
 #endif
 
@@ -3923,13 +3889,9 @@ private:
         }
 
 #if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
         {
-            ScopedLock locker{ direct2DLock };
-
-            if (direct2DContext != nullptr)
-            {
-                direct2DContext->setScaleFactor(newScale);
-            }
+            direct2DContext->setScaleFactor(newScale);
         }
 #endif
 
@@ -4142,17 +4104,11 @@ private:
 
             case WM_NCPAINT:
 #if JUCE_DIRECT2D
-            {
-                juce::ScopedLock locker{ direct2DLock };
-
-                if (direct2DContext != nullptr)
-                {
-                    handlePaintMessage();
-                }
-            }
-#else
-                handlePaintMessage();
+                if (direct2DContext == nullptr)
 #endif
+                {
+                    handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+                }
 
                 if (hasTitleBar())
                     break; // let the DefWindowProc handle drawing the frame.

@@ -48,18 +48,10 @@ namespace juce
             void resized()
             {
                 //
-                // Get the size of the window
-                //
-                RECT windowRect;
-                GetClientRect(windowHandle, &windowRect);
-
-                //
                 // Get the width & height from the client area; make sure width and height are at least 1
                 //
-                auto width = windowRect.right - windowRect.left;
-                auto height = windowRect.bottom - windowRect.top;
-                width = jmax(width, 1l);
-                height = jmax(height, 1l);
+                auto windowRect = getClientRect();
+                bufferBounds.setSize(jmax(windowRect.getWidth(), 1), jmax(windowRect.getHeight(), 1));
 
                 //
                 // Resize the swap chain 
@@ -73,8 +65,8 @@ namespace juce
                 {
                     swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-                    auto scaledWidth = roundToInt(width * scaleFactor);
-                    auto scaledHeight = roundToInt(height * scaleFactor);
+                    auto scaledWidth = roundToInt(bufferBounds.getWidth() * scaleFactor);
+                    auto scaledHeight = roundToInt(bufferBounds.getHeight() * scaleFactor);
                     auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
                     partialRepaintReady = false;
 
@@ -91,11 +83,7 @@ namespace juce
 
             bool canPartiallyRepaint(Rectangle<int> partialRepaintArea)
             {
-                RECT windowRect;
-                GetClientRect(windowHandle, &windowRect);
-
-                return partialRepaintReady && 
-                    Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom).contains(partialRepaintArea);
+                return partialRepaintReady && getClientRect().contains(partialRepaintArea);
             }
 
             void startRender()
@@ -125,7 +113,7 @@ namespace juce
                     if (SUCCEEDED(hr))
                     {
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
-                        if (updateRect != nullptr && !updateRect->isEmpty())
+                        if (updateRect != nullptr && !updateRect->isEmpty() && bufferBounds.contains(*updateRect))
                         {
                             RECT dirtyRectangle
                             {
@@ -153,6 +141,10 @@ namespace juce
                             {
                                 hr = swapChain->Present(presentSyncInterval, presentFlags);
                                 ValidateRect(windowHandle, nullptr);
+                            }
+                            else
+                            {
+                                jassertfalse;
                             }
                         }
                         else
@@ -182,12 +174,21 @@ namespace juce
                 return colourBrush;
             }
 
+            Rectangle<int> getClientRect() const
+            {
+                RECT windowRect;
+                GetClientRect(windowHandle, &windowRect);
+                
+                return juce::Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
+            }
+
         private:
             HWND const windowHandle;
             DXGI_SWAP_EFFECT const swapEffect;
             UINT const bufferCount;
             DXGI_SCALING const dxgiScaling;
-            double scaleFactor;
+            double scaleFactor = 1.0;
+            juce::Rectangle<int> bufferBounds{ 1, 1 };
             uint32 const swapChainFlags;
             uint32 const presentSyncInterval;
             uint32 const presentFlags;
@@ -240,8 +241,8 @@ namespace juce
                                     {
                                         DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
                                         swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                                        swapChainDescription.Width = 1;
-                                        swapChainDescription.Height = 1;
+                                        swapChainDescription.Width = bufferBounds.getWidth();
+                                        swapChainDescription.Height = bufferBounds.getHeight();
                                         swapChainDescription.SampleDesc.Count = 1;
                                         swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
                                         swapChainDescription.BufferCount = bufferCount;
