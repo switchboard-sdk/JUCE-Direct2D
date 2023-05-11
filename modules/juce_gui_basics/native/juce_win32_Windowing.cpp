@@ -1772,12 +1772,9 @@ public:
             dropTarget = nullptr;
         }
 
-       #if JUCE_DIRECT2D
-        {
-            ScopedLock locker{ direct2DLock };
-            direct2DContext = nullptr;
-        }
-       #endif
+        #if JUCE_DIRECT2D
+        direct2DContext = nullptr;
+        #endif
     }
 
     //==============================================================================
@@ -1820,17 +1817,13 @@ public:
                                             roundToInt ((info.rcWindow.bottom - info.rcClient.bottom) / scaleFactor),
                                             roundToInt ((info.rcWindow.right  - info.rcClient.right)  / scaleFactor));
 
-       #if JUCE_DIRECT2D
+        #if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
         {
-            ScopedLock locker{ direct2DLock };
-
-            if (direct2DContext != nullptr)
-            {
-                direct2DContext->resized();
-                handleDirect2DPaint();
-            }
+            direct2DContext->resized();
+            handleDirect2DPaint();
         }
-       #endif
+        #endif
     }
 
     void setBounds (const Rectangle<int>& bounds, bool isNowFullScreen) override
@@ -2418,7 +2411,6 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
-    CriticalSection direct2DLock;
    #endif
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
@@ -2849,8 +2841,6 @@ private:
         auto startPaintTicks = juce::Time::getHighResolutionTicks();
 
 #if JUCE_DIRECT2D
-        ScopedLock locker{ direct2DLock };
-
         if (direct2DContext != nullptr)
         {
             handleDirect2DPaint();
@@ -2899,8 +2889,6 @@ private:
 #if JUCE_DIRECT2D
     void handleDirect2DPaint()
     {
-        ScopedLock locker{ direct2DLock };
-
         jassert(direct2DContext);
 
 #if JUCE_DIRECT2D_PARTIAL_REPAINT
@@ -2918,7 +2906,6 @@ private:
                     direct2DContext->clipToRectangle(logicalUpdateRect);
                     handlePaint(*direct2DContext);
                     direct2DContext->end(&logicalUpdateRect);
-                    ValidateRect(hwnd, &physicalScreenUpdateRect);
                     return;
                 }
             }
@@ -2931,7 +2918,6 @@ private:
         direct2DContext->start();
         handlePaint(*direct2DContext);
         direct2DContext->end();
-        ValidateRect(hwnd, nullptr);
     }
 #endif
 
@@ -3061,8 +3047,6 @@ private:
    #if JUCE_DIRECT2D
     void updateDirect2DContext()
     {
-        ScopedLock locker{ direct2DLock };
-
         auto exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
         if (currentRenderingEngine != direct2DRenderingEngine)
@@ -3073,7 +3057,8 @@ private:
         }
         else if (direct2DContext == nullptr)
         {
-            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, getPlatformScaleFactor());
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd);
+            direct2DContext->setScaleFactor(getPlatformScaleFactor());
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
         }
@@ -3093,18 +3078,6 @@ private:
         }
        #endif
     }
-
-#if JUCE_DIRECT2D
-    LowLevelGraphicsContext* const getLowLevelGraphicsContext() noexcept override
-    {
-        return direct2DContext.get();
-    }
-
-    CriticalSection* getLock() noexcept override
-    {
-        return &direct2DLock;
-    }
-#endif
 
     static uint32 getMinTimeBetweenMouseMoves()
     {
@@ -3869,15 +3842,11 @@ private:
 #endif
 
 #if JUCE_DIRECT2D
-        {
-            ScopedLock locker{ direct2DLock };
-
             if (direct2DContext)
             {
                 direct2DContext->resized();
                 handleDirect2DPaint();
             }
-        }
 #endif
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
@@ -3923,14 +3892,10 @@ private:
         }
 
 #if JUCE_DIRECT2D
-        {
-            ScopedLock locker{ direct2DLock };
-
             if (direct2DContext != nullptr)
             {
                 direct2DContext->setScaleFactor(newScale);
             }
-        }
 #endif
 
         updateShadower();
