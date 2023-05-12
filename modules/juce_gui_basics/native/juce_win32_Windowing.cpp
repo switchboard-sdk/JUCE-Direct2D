@@ -1711,11 +1711,7 @@ public:
         : ComponentPeer (comp, windowStyleFlags),
           dontRepaint (nonRepainting),
           parentToAddTo (parent),
-#if JUCE_DIRECT2D
-          currentRenderingEngine(direct2DRenderingEngine)
-#else
           currentRenderingEngine (softwareRenderingEngine)
-#endif
     {
         callFunctionIfNotLocked (&createWindowCallback, this);
 
@@ -3892,10 +3888,10 @@ private:
         }
 
 #if JUCE_DIRECT2D
-            if (direct2DContext != nullptr)
-            {
-                direct2DContext->setScaleFactor(newScale);
-            }
+        if (direct2DContext != nullptr)
+        {
+            direct2DContext->setScaleFactor(newScale);
+        }
 #endif
 
         updateShadower();
@@ -4107,13 +4103,11 @@ private:
 
             case WM_NCPAINT:
 #if JUCE_DIRECT2D
-                if (direct2DContext != nullptr)
-                {
-                    handlePaintMessage();
-                }
-#else
-                handlePaintMessage();
+                if (direct2DContext == nullptr)
 #endif
+                {
+                    handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+                }
 
                 if (hasTitleBar())
                     break; // let the DefWindowProc handle drawing the frame.
