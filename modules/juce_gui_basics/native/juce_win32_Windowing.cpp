@@ -2902,7 +2902,6 @@ private:
                     direct2DContext->clipToRectangle(logicalUpdateRect);
                     handlePaint(*direct2DContext);
                     direct2DContext->end(&logicalUpdateRect);
-                    ValidateRect(hwnd, &physicalScreenUpdateRect);
                     return;
                 }
             }
@@ -2915,7 +2914,6 @@ private:
         direct2DContext->start();
         handlePaint(*direct2DContext);
         direct2DContext->end();
-        ValidateRect(hwnd, nullptr);
     }
 #endif
 
