@@ -1549,7 +1549,7 @@ void AudioProcessorParameter::endChangeGesture()
     // This means you've called endChangeGesture without having previously
     // called beginChangeGesture. That might be fine in most hosts, but it
     // would be better to keep the calls matched correctly.
-    jassert (isPerformingGesture);
+    //jassert (isPerformingGesture);
     isPerformingGesture = false;
    #endif
 

@@ -2893,7 +2893,7 @@ private:
         //
         {
             RECT physicalScreenUpdateRect;
-            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))-
+            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
             {
                 auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
                 if (direct2DContext->canPartiallyRepaint(logicalUpdateRect))

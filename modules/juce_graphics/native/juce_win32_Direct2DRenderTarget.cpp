@@ -69,8 +69,8 @@ namespace juce
                 {
                     swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-                    auto scaledWidth = roundToInt(width * dpiScalingFactor);
-                    auto scaledHeight = roundToInt(height * dpiScalingFactor);
+                    auto scaledWidth = roundToInt(bufferBounds.getWidth() * dpiScalingFactor);
+                    auto scaledHeight = roundToInt(bufferBounds.getHeight() * dpiScalingFactor);
                     auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
                     partialRepaintReady = false;
 
