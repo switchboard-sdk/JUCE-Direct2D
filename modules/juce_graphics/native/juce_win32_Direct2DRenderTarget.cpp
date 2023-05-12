@@ -50,9 +50,15 @@ namespace juce
                 //
                 // Get the width & height from the client area; make sure width and height are at least 1
                 //
-                auto windowRect = getClientRect();
-                bufferBounds.setSize(jmax(windowRect.getWidth(), 1), jmax(windowRect.getHeight(), 1));
+                auto windowRect = getClientRect().getUnion({ 1, 1 });
+                if (bufferBounds == windowRect)
+                {
+                    return;
+                }
 
+                bufferBounds = windowRect;
+
+                
                 //
                 // Resize the swap chain 
                 //
