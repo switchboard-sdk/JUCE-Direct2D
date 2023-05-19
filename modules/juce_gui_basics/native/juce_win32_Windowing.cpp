@@ -2877,8 +2877,11 @@ private:
 
         auto finishPaintTicks = juce::Time::getHighResolutionTicks();
 
-        paintDurationSeconds.addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
-        paintIntervalSeconds.addValue(Time::highResolutionTicksToSeconds(startPaintTicks - lastPaintStartTicks));
+        measuredPaintDurationSeconds.addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
+        if (lastPaintStartTicks != 0)
+        {
+            measuredPaintIntervalSeconds.addValue(Time::highResolutionTicksToSeconds(startPaintTicks - lastPaintStartTicks));
+        }
         lastPaintStartTicks = startPaintTicks;
     }
 

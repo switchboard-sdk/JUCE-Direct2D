@@ -542,9 +542,14 @@ public:
     /** Returns the style requested for this app. */
     Style getAppStyle() const { return style; }
 
-    StatisticsAccumulator<double> const& getPaintDurationSeconds() const noexcept { return paintDurationSeconds; }
-    StatisticsAccumulator<double> const& getPaintIntervalSeconds() const noexcept { return paintIntervalSeconds; }
-
+    StatisticsAccumulator<double> measuredPaintDurationSeconds;
+    StatisticsAccumulator<double> measuredPaintIntervalSeconds;
+    void resetStats()
+    {
+        measuredPaintDurationSeconds.reset();
+        measuredPaintIntervalSeconds.reset();
+        lastPaintStartTicks = 0;
+    }
 
 protected:
     //==============================================================================
@@ -559,9 +564,7 @@ protected:
     ListenerList<VBlankListener> vBlankListeners;
     Style style = Style::automatic;
 
-    StatisticsAccumulator<double> paintDurationSeconds;
-    StatisticsAccumulator<double> paintIntervalSeconds;
-    int64 lastPaintStartTicks = Time::getHighResolutionTicks();
+    int64 lastPaintStartTicks = 0;
 
 private:
     //==============================================================================
