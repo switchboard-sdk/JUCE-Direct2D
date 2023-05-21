@@ -544,11 +544,13 @@ public:
 
     StatisticsAccumulator<double> measuredPaintDurationSeconds;
     StatisticsAccumulator<double> measuredPaintIntervalSeconds;
+    int paintCount = 0;
     void resetStats()
     {
         measuredPaintDurationSeconds.reset();
         measuredPaintIntervalSeconds.reset();
         lastPaintStartTicks = 0;
+        paintCount = 0;
     }
 
 protected:

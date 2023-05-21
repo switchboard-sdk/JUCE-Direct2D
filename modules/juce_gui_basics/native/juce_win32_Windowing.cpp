@@ -4101,6 +4101,7 @@ private:
             //==============================================================================
 
             case WM_PAINT:
+                paintCount++;
                 handlePaintMessage();
                 return 0;
 
