@@ -46,16 +46,17 @@ namespace juce
             void resized()
             {
                 //
-                // Get the width & height from the client area; make sure width and height are at least 1
+                // Get the width & height from the client area; make sure width and height are between 1 and 16384
                 //
-                auto windowRect = getClientRect().getUnion({ 1, 1 });
+                int constexpr minSize = 1;
+                int constexpr maxSize = 16384;
+                auto windowRect = getClientRect().getUnion({ minSize, minSize }).getIntersection({ maxSize, maxSize });
                 if (bufferBounds == windowRect)
                 {
                     return;
                 }
 
                 bufferBounds = windowRect;
-
                 
                 //
                 // Resize the swap chain 
