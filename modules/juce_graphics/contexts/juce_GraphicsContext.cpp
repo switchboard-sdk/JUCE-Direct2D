@@ -655,6 +655,7 @@ void Graphics::fillRoundedRectangle (Rectangle<float> r, const float cornerSize)
     {
         return;
     }
+
     Path p;
     p.addRoundedRectangle (r, cornerSize);
     fillPath (p);
@@ -672,6 +673,7 @@ void Graphics::drawRoundedRectangle (Rectangle<float> r, float cornerSize, float
     {
         return;
     }
+    
     Path p;
     p.addRoundedRectangle (r, cornerSize);
     strokePath (p, PathStrokeType (lineThickness));

@@ -937,9 +937,9 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
     if (currentState->currentFontFace != nullptr && deviceContext != nullptr)
     {
         auto hScale = currentState->font.getHorizontalScale();
-
         auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
-        deviceContext->SetTransform(Direct2D::transformToMatrix(scaledTransform.followedBy(currentState->currentTransform.getTransform())));
+        auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
+        deviceContext->SetTransform(Direct2D::transformToMatrix(deviceContextTransform));
 
         const auto glyphIndices = (UINT16)glyphNumber;
         const auto glyphAdvances = 0.0f;
@@ -1042,4 +1042,58 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
 
     return false;
 }
+
+void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform)
+{
+    currentState->createBrush();
+    currentState->createFont();
+
+    jassert(currentState->currentFontFace);
+
+    auto deviceContext = pimpl->getDeviceContext();
+    if (currentState->currentFontFace != nullptr && deviceContext != nullptr && glyphRun.size() > 0)
+    {
+        auto hScale = currentState->font.getHorizontalScale();
+        auto inverseHScale = hScale > 0.0f ? 1.0f / hScale : 1.0f;
+
+        auto scaledTransform = AffineTransform::scale(1.0f, 1.0f).followedBy(transform);
+        auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
+        deviceContext->SetTransform(Direct2D::transformToMatrix(deviceContextTransform));
+
+        HeapBlock<UINT16> glyphIndices{ glyphRun.size() };
+        HeapBlock<float> glyphAdvances{ glyphRun.size() };
+        HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets{ glyphRun.size() };
+
+        for (int i = 0; i < glyphRun.size(); ++i)
+        {
+            auto const& glyph = glyphRun[i];
+            glyphIndices[i] = (UINT16)glyph.glyphIndex;
+            glyphAdvances[i] = 0.0f;
+            glyphOffsets[i] = { glyph.left * inverseHScale, -glyph.baselineY }; // note the essential minus sign before the baselineY value; negatvie offset goes down, positive goes up (opposite from JUCE)
+        }
+
+        DWRITE_GLYPH_RUN directWriteGlyphRun;
+        directWriteGlyphRun.fontFace = currentState->currentFontFace;
+        directWriteGlyphRun.fontEmSize = (FLOAT)(currentState->font.getHeight() * currentState->fontHeightToEmSizeFactor);
+        directWriteGlyphRun.glyphCount = glyphRun.size();
+        directWriteGlyphRun.glyphIndices = glyphIndices.getData();
+        directWriteGlyphRun.glyphAdvances = glyphAdvances.getData();
+        directWriteGlyphRun.glyphOffsets = glyphOffsets.getData();
+        directWriteGlyphRun.isSideways = FALSE;
+        directWriteGlyphRun.bidiLevel = 0;
+
+        //
+        // The gradient brushes are position-dependent, so need to undo the device context transform
+        //
+        D2D1::Matrix3x2F brushTransform;
+        currentState->currentBrush->GetTransform(&brushTransform);
+        currentState->currentBrush->SetTransform(Direct2D::transformToMatrix(scaledTransform.inverted()));
+
+        deviceContext->DrawGlyphRun({}, &directWriteGlyphRun, currentState->currentBrush);
+
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+        currentState->currentBrush->SetTransform(brushTransform);
+    }
+}
+
 } // namespace juce

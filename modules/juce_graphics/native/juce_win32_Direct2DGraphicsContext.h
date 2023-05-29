@@ -75,7 +75,9 @@ public:
     void setFont (const Font&) override;
     const Font& getFont() override;
     void drawGlyph (int glyphNumber, const AffineTransform&) override;
-    bool drawTextLayout (const AttributedString&, const Rectangle<float>&) override;
+    bool supportsGlyphRun() override { return true; }
+    void drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform) override;
+    bool drawTextLayout(const AttributedString&, const Rectangle<float>&) override;
 
     void resized();
 
@@ -87,8 +89,9 @@ public:
 
     bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const;
 
-    virtual bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
-    virtual bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
+    bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
+    bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
+
 
     //==============================================================================
 private:
