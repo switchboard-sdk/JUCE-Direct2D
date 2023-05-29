@@ -67,7 +67,8 @@ public:
     void fillRect (const Rectangle<int>&, bool replaceExistingContents) override;
     void fillRect (const Rectangle<float>&) override;
     void fillRectList (const RectangleList<float>&) override;
-    void fillPath (const Path&, const AffineTransform&) override;                        
+    bool drawRect(const Rectangle<float>&, float) override;
+    void fillPath (const Path&, const AffineTransform&) override;
     bool drawPath(const Path&, const PathStrokeType& strokeType, const AffineTransform&) override;
     void drawImage (const Image& sourceImage, const AffineTransform&) override;
 

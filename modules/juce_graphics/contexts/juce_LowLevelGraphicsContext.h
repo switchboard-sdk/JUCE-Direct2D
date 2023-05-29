@@ -91,6 +91,7 @@ public:
     virtual void fillRect (const Rectangle<float>&) = 0;
     virtual void fillRectList (const RectangleList<float>&) = 0;
     virtual void fillPath (const Path&, const AffineTransform&) = 0;
+    virtual bool drawRect(const Rectangle<float>&, float) { return false; }
     virtual bool drawPath(const Path&, const PathStrokeType&, const AffineTransform&) { return false; }
     virtual void drawImage (const Image&, const AffineTransform&) = 0;
     virtual void drawLine (const Line<float>&) = 0;

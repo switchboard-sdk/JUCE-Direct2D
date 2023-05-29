@@ -862,6 +862,21 @@ void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& 
         fillRect (r);
 }
 
+bool Direct2DLowLevelGraphicsContext::drawRect(const Rectangle<float>& r, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->DrawRectangle(Direct2D::rectangleToRectF(r), currentState->currentBrush, lineThickness);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
 void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTransform& transform)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
