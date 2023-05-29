@@ -1043,6 +1043,13 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
     return false;
 }
 
+#if JUCE_DEBUG
+void printTransform(StringRef name, AffineTransform const& transform)
+{
+    DBG(name << "  scale:" << transform.getScaleFactor() << "  translate:" << transform.getTranslationX() << " / " << transform.getTranslationY());
+}
+#endif
+
 void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform)
 {
     currentState->createBrush();
@@ -1050,15 +1057,26 @@ void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun,
 
     jassert(currentState->currentFontFace);
 
+#if 0
+    DBG("drawGlyphRun");
+
+    for (auto const& glyph : glyphRun)
+    {
+        DBG("glyph " << glyph.glyphIndex << " x:" << glyph.left << " / " << glyph.baselineY);
+    }
+#endif
+
     auto deviceContext = pimpl->getDeviceContext();
     if (currentState->currentFontFace != nullptr && deviceContext != nullptr && glyphRun.size() > 0)
     {
         auto hScale = currentState->font.getHorizontalScale();
         auto inverseHScale = hScale > 0.0f ? 1.0f / hScale : 1.0f;
 
-        auto scaledTransform = AffineTransform::scale(1.0f, 1.0f).followedBy(transform);
+        auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
         auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
         deviceContext->SetTransform(Direct2D::transformToMatrix(deviceContextTransform));
+
+        //printTransform("   deviceContextTransform ", deviceContextTransform);
 
         HeapBlock<UINT16> glyphIndices{ glyphRun.size() };
         HeapBlock<float> glyphAdvances{ glyphRun.size() };

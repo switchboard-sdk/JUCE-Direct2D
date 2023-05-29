@@ -747,6 +747,8 @@ void GlyphArrangement::draw (const Graphics& g, AffineTransform transform) const
                 glyphRun.add({ pg.glyph, pg.x, pg.y, pg.w });
             }
         }
+
+        context.drawGlyphRun(glyphRun, transform);
     }
     else
     {
