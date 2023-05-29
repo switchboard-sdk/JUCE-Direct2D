@@ -312,6 +312,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     SharedResourcePointer<Direct2DFactories> sharedFactories;
     ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
+    ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
 
 private:
     HWND hwnd = nullptr;
@@ -873,6 +874,90 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
             deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
     }
+}
+
+bool Direct2DLowLevelGraphicsContext::drawPath(const Path& p, const PathStrokeType& strokeType, const AffineTransform& transform)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        if (auto geometry = pimpl->pathToPathGeometry(p, transform))
+        {
+            // JUCE JointStyle   ID2D1StrokeStyle 
+            // ---------------   ----------------
+            // mitered           D2D1_LINE_JOIN_MITER
+            // curved            D2D1_LINE_JOIN_ROUND
+            // beveled           D2D1_LINE_JOIN_BEVEL
+            //
+            // JUCE EndCapStyle  ID2D1StrokeStyle 
+            // ----------------  ----------------
+            // butt              D2D1_CAP_STYLE_FLAT
+            // square            D2D1_CAP_STYLE_SQUARE 
+            // rounded           D2D1_CAP_STYLE_ROUND
+            //
+            auto lineJoin = D2D1_LINE_JOIN_MITER;
+            switch (strokeType.getJointStyle())
+            {
+            case PathStrokeType::JointStyle::mitered:
+                // already set
+                break;
+
+            case PathStrokeType::JointStyle::curved:
+                lineJoin = D2D1_LINE_JOIN_ROUND;
+                break;
+
+            case PathStrokeType::JointStyle::beveled:
+                lineJoin = D2D1_LINE_JOIN_BEVEL;
+                break;
+
+            default:
+                // invalid EndCapStyle
+                jassertfalse;
+                break;
+            }
+
+            auto capStyle = D2D1_CAP_STYLE_FLAT;
+            switch (strokeType.getEndStyle())
+            {
+            case PathStrokeType::EndCapStyle::butt:
+                // already set
+                break;
+
+            case PathStrokeType::EndCapStyle::square:
+                capStyle = D2D1_CAP_STYLE_SQUARE;
+                break;
+
+            case PathStrokeType::EndCapStyle::rounded:
+                capStyle = D2D1_CAP_STYLE_ROUND;
+                break;
+
+            default:
+                // invalid EndCapStyle
+                jassertfalse;
+                break;
+            }
+
+            D2D1_STROKE_STYLE_PROPERTIES strokeStyleProperties
+            {
+                capStyle, capStyle, capStyle,
+                lineJoin,
+                1.0f,
+                D2D1_DASH_STYLE_SOLID,
+                0.0f
+            };
+            pimpl->d2dDedicatedFactory->CreateStrokeStyle(strokeStyleProperties, // TODO reuse the stroke style
+                nullptr, 0,
+                pimpl->strokeStyle.resetAndGetPointerAddress());
+
+            deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+            deviceContext->DrawGeometry(geometry, currentState->currentBrush, strokeType.getStrokeThickness(), pimpl->strokeStyle);
+            deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)

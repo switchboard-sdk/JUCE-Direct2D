@@ -91,6 +91,7 @@ public:
     virtual void fillRect (const Rectangle<float>&) = 0;
     virtual void fillRectList (const RectangleList<float>&) = 0;
     virtual void fillPath (const Path&, const AffineTransform&) = 0;
+    virtual bool drawPath(const Path&, const PathStrokeType&, const AffineTransform&) { return false; }
     virtual void drawImage (const Image&, const AffineTransform&) = 0;
     virtual void drawLine (const Line<float>&) = 0;
 
@@ -110,11 +111,11 @@ public:
 
     virtual bool drawTextLayout(const AttributedString&, const Rectangle<float>&) { return false; }
 
-    virtual bool drawRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/, float /* lineThickness */) { return false; }
-    virtual bool fillRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/) { return false; }
+    virtual bool drawRoundedRectangle(Rectangle<float>, float, float) { return false; }
+    virtual bool fillRoundedRectangle(Rectangle<float>, float) { return false; }
 
-    virtual bool drawEllipse(Rectangle<float> /*area*/, float /*lineThickness*/) { return false; }
-    virtual bool fillEllipse(Rectangle<float> /*area*/) { return false; }
+    virtual bool drawEllipse(Rectangle<float>, float) { return false; }
+    virtual bool fillEllipse(Rectangle<float>) { return false; }
 };
 
 } // namespace juce
