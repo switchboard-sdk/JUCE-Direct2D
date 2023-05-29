@@ -87,6 +87,9 @@ public:
 
     bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const;
 
+    virtual bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
+    virtual bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
+
     //==============================================================================
 private:
     struct SavedState;

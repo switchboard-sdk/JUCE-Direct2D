@@ -220,12 +220,14 @@ Rectangle<int> Graphics::getClipBounds() const
 
 void Graphics::saveState()
 {
+
     saveStateIfPending();
     saveStatePending = true;
 }
 
 void Graphics::restoreState()
 {
+
     if (saveStatePending)
         saveStatePending = false;
     else
@@ -649,6 +651,10 @@ void Graphics::fillRoundedRectangle (float x, float y, float width, float height
 
 void Graphics::fillRoundedRectangle (Rectangle<float> r, const float cornerSize) const
 {
+    if (context.fillRoundedRectangle(r, cornerSize))
+    {
+        return;
+    }
     Path p;
     p.addRoundedRectangle (r, cornerSize);
     fillPath (p);
@@ -662,6 +668,10 @@ void Graphics::drawRoundedRectangle (float x, float y, float width, float height
 
 void Graphics::drawRoundedRectangle (Rectangle<float> r, float cornerSize, float lineThickness) const
 {
+    if (context.drawRoundedRectangle(r, cornerSize, lineThickness))
+    {
+        return;
+    }
     Path p;
     p.addRoundedRectangle (r, cornerSize);
     strokePath (p, PathStrokeType (lineThickness));

@@ -98,6 +98,9 @@ public:
     virtual const Font& getFont() = 0;
     virtual void drawGlyph (int glyphNumber, const AffineTransform&) = 0;
     virtual bool drawTextLayout (const AttributedString&, const Rectangle<float>&)  { return false; }
+
+    virtual bool drawRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/, float /* lineThickness */) { return false; }
+    virtual bool fillRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/) { return false; }
 };
 
 } // namespace juce

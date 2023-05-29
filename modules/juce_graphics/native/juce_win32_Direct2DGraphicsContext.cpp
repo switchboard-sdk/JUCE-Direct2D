@@ -1001,4 +1001,45 @@ bool Direct2DLowLevelGraphicsContext::canPartiallyRepaint(Rectangle<int> partial
     return pimpl->canPartiallyRepaint(partialRepaintArea);
 }
 
+bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ROUNDED_RECT roundedRect
+        {
+            Direct2D::rectangleToRectF(area),
+            cornerSize, cornerSize
+        };
+        deviceContext->DrawRoundedRectangle(&roundedRect, currentState->currentBrush, lineThickness);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area, float cornerSize)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        
+        D2D1_ROUNDED_RECT roundedRect
+        {
+            Direct2D::rectangleToRectF(area),
+            cornerSize, cornerSize
+        };
+        deviceContext->FillRoundedRectangle(&roundedRect, currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
 } // namespace juce
