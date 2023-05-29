@@ -1013,7 +1013,7 @@ bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area
             Direct2D::rectangleToRectF(area),
             cornerSize, cornerSize
         };
-        deviceContext->DrawRoundedRectangle(&roundedRect, currentState->currentBrush, lineThickness);
+        deviceContext->DrawRoundedRectangle(roundedRect, currentState->currentBrush, lineThickness);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
 
         return true;
@@ -1034,7 +1034,7 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
             Direct2D::rectangleToRectF(area),
             cornerSize, cornerSize
         };
-        deviceContext->FillRoundedRectangle(&roundedRect, currentState->currentBrush);
+        deviceContext->FillRoundedRectangle(roundedRect, currentState->currentBrush);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
 
         return true;
@@ -1043,7 +1043,49 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
     return false;
 }
 
-#if JUCE_DEBUG
+bool Direct2DLowLevelGraphicsContext::drawEllipse(Rectangle<float> area, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ELLIPSE ellipse
+        {
+            { area.getCentreX(), area.getCentreY() },
+            area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
+        };
+        deviceContext->DrawEllipse(ellipse, currentState->currentBrush, lineThickness, nullptr);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ELLIPSE ellipse
+        {
+            { area.getCentreX(), area.getCentreY() },
+            area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
+        };
+        deviceContext->FillEllipse(ellipse, currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+#if 0 // JUCE_DEBUG
 void printTransform(StringRef name, AffineTransform const& transform)
 {
     DBG(name << "  scale:" << transform.getScaleFactor() << "  translate:" << transform.getTranslationX() << " / " << transform.getTranslationY());

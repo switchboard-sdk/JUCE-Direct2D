@@ -112,6 +112,9 @@ public:
 
     virtual bool drawRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/, float /* lineThickness */) { return false; }
     virtual bool fillRoundedRectangle(Rectangle<float> /*area*/, float /*cornerSize*/) { return false; }
+
+    virtual bool drawEllipse(Rectangle<float> /*area*/, float /*lineThickness*/) { return false; }
+    virtual bool fillEllipse(Rectangle<float> /*area*/) { return false; }
 };
 
 } // namespace juce

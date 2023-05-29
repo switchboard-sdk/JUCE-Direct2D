@@ -610,6 +610,11 @@ void Graphics::drawRect (Rectangle<float> r, const float lineThickness) const
 //==============================================================================
 void Graphics::fillEllipse (Rectangle<float> area) const
 {
+    if (context.fillEllipse(area))
+    {
+        return;
+    }
+
     Path p;
     p.addEllipse (area);
     fillPath (p);
@@ -627,6 +632,11 @@ void Graphics::drawEllipse (float x, float y, float width, float height, float l
 
 void Graphics::drawEllipse (Rectangle<float> area, float lineThickness) const
 {
+    if (context.drawEllipse(area, lineThickness))
+    {
+        return;
+    }
+
     Path p;
 
     if (area.getWidth() == area.getHeight())

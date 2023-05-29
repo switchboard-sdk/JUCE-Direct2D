@@ -92,6 +92,9 @@ public:
     bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
     bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
 
+    bool drawEllipse(Rectangle<float> area, float lineThickness) override;
+    bool fillEllipse(Rectangle<float> area) override;
+
 
     //==============================================================================
 private:
