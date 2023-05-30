@@ -239,7 +239,7 @@ namespace DirectWriteTypeLayout
             case Justification::left:                   break;
             case Justification::right:                  alignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
             case Justification::horizontallyCentred:    alignment = DWRITE_TEXT_ALIGNMENT_CENTER; break;
-            case Justification::horizontallyJustified:  break; // DirectWrite cannot justify text, default to left alignment
+            case Justification::horizontallyJustified:  alignment = DWRITE_TEXT_ALIGNMENT_JUSTIFIED; break; // DirectWrite cannot justify text, default to left alignment
             default:                                    jassertfalse; break; // Illegal justification flags
         }
 
