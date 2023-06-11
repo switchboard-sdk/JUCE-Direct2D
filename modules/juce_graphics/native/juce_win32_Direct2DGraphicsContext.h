@@ -81,7 +81,7 @@ public:
     void drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform) override;
     bool drawTextLayout(const AttributedString&, const Rectangle<float>&) override;
 
-    void resized();
+    bool resized();
 
     void start();
     void end(Rectangle<int>* updateRect = nullptr);

@@ -280,9 +280,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return renderTarget->getColourBrush();
     }
 
-    void resized()
+    bool resized()
     {
-        renderTarget->resized();
+        return renderTarget->resized();
     }
 
     void startRender()
@@ -635,9 +635,9 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
     states.clear();
 }
 
-void Direct2DLowLevelGraphicsContext::resized()
+bool Direct2DLowLevelGraphicsContext::resized()
 {
-    pimpl->resized();
+    return pimpl->resized();
 }
 
 void Direct2DLowLevelGraphicsContext::start()
@@ -1088,6 +1088,7 @@ bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& te
 
 void Direct2DLowLevelGraphicsContext::setScaleFactor(double scale_)
 {
+    DBG("setScaleFactor " << scale_);
     pimpl->setScaleFactor(scale_);
 }
 

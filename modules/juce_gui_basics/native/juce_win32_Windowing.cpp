@@ -1711,7 +1711,7 @@ public:
         : ComponentPeer (comp, windowStyleFlags),
           dontRepaint (nonRepainting),
           parentToAddTo (parent),
-          currentRenderingEngine (softwareRenderingEngine)
+          currentRenderingEngine (direct2DRenderingEngine)
     {
         callFunctionIfNotLocked (&createWindowCallback, this);
 
@@ -3843,8 +3843,10 @@ private:
 #if JUCE_DIRECT2D
         if (direct2DContext)
         {
-            direct2DContext->resized();
-            handleDirect2DPaint();
+            if (direct2DContext->resized())
+            {
+                handleDirect2DPaint();
+            }
         }
 #endif
 

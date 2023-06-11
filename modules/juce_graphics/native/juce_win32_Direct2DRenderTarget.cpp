@@ -43,7 +43,7 @@ namespace juce
                 return dpiScalingFactor;
             }
 
-            void resized()
+            bool resized()
             {
                 //
                 // Get the width & height from the client area; make sure width and height are between 1 and 16384
@@ -53,7 +53,7 @@ namespace juce
                 auto windowRect = getClientRect().getUnion({ minSize, minSize }).getIntersection({ maxSize, maxSize });
                 if (bufferBounds == windowRect)
                 {
-                    return;
+                    return false;
                 }
 
                 bufferBounds = windowRect;
@@ -78,12 +78,16 @@ namespace juce
                     if (SUCCEEDED(hr))
                     {
                         createSwapChainBuffer();
+
+                        return true;
                     }
                     else
                     {
                         releaseDeviceContext();
                     }
                 }
+
+                return false;
             }
 
             bool canPartiallyRepaint(Rectangle<int> partialRepaintArea)
