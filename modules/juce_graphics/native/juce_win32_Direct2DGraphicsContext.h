@@ -56,7 +56,7 @@ struct PaintStats
     }
 };
 
-class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext
+class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public juce::AsyncUpdater
 {
 public:
     Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_);
@@ -108,13 +108,13 @@ public:
 
     bool resized();
 
-    void start();
-    void end(Rectangle<int>* updateRect = nullptr);
+    void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
+    void startPartialPaint();
+    void startFullPaint();
+    void end();
 
     void setScaleFactor(double scale_);
     double getScaleFactor() const;
-
-    bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const;
 
     bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
     bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
@@ -122,6 +122,7 @@ public:
     bool drawEllipse(Rectangle<float> area, float lineThickness) override;
     bool fillEllipse(Rectangle<float> area) override;
 
+    std::function<void()> onPaintReady = nullptr;
 
     //==============================================================================
 private:
@@ -134,6 +135,8 @@ private:
 
     struct Pimpl;
     std::unique_ptr<Pimpl> pimpl;
+
+    void handleAsyncUpdate() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DLowLevelGraphicsContext)
 };

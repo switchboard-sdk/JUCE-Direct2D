@@ -1817,7 +1817,7 @@ public:
         if (direct2DContext != nullptr)
         {
             direct2DContext->resized();
-            handleDirect2DPaint();
+            //handleDirect2DPaint();
         }
         #endif
     }
@@ -2168,7 +2168,7 @@ public:
 #if JUCE_DIRECT2D
         if (direct2DContext)
         {
-            deferredRepaints.add((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
+            direct2DContext->addDeferredRepaint((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
         }
         else
 #endif
@@ -2182,6 +2182,16 @@ public:
     {
         if (component.isVisible())
         {
+#if JUCE_DIRECT2D
+            if (direct2DContext)
+            {
+                //handleDirect2DPaint();
+            }
+            else
+#endif
+            {
+                jassertfalse; // xxx fix this
+            }
         }
     }
 #endif
@@ -2903,7 +2913,7 @@ private:
     {
         jassert(direct2DContext);
 
-        direct2DContext->start();
+        direct2DContext->startPartialPaint();
         handlePaint(*direct2DContext);
         direct2DContext->end();
     }
@@ -3049,6 +3059,8 @@ private:
             direct2DContext->setScaleFactor(getPlatformScaleFactor());
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
+
+            direct2DContext->onPaintReady = [this]() { handleDirect2DPaint(); };
         }
 
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
@@ -3834,7 +3846,7 @@ private:
         {
             if (direct2DContext->resized())
             {
-                handleDirect2DPaint();
+                //handleDirect2DPaint();
             }
         }
 #endif

@@ -115,7 +115,7 @@
 namespace juce
 {
 
-    namespace Direct2D
+    namespace direct2d
     {
         template <typename Type>
         D2D1_RECT_F rectangleToRectF(const Rectangle<Type>& r)
@@ -259,6 +259,11 @@ namespace juce
         class UpdateRegion
         {
         public:
+            ~UpdateRegion()
+            {
+                clear();
+            }
+
             void getWindowUpdateRegion(HWND windowHandle)
             {
                 numRect = 0;
@@ -385,7 +390,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         if (objects.sink != nullptr)
         {
-            Direct2D::rectToGeometrySink(rect, objects.sink, transform);
+            direct2d::rectToGeometrySink(rect, objects.sink, transform);
             return { (ID2D1Geometry*)objects.geometry };
         }
 
@@ -399,7 +404,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         if (objects.sink != nullptr)
         {
             for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-                Direct2D::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+                direct2d::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
 
             return { (ID2D1Geometry*)objects.geometry };
         }
@@ -413,7 +418,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         if (objects.sink != nullptr)
         {
-            Direct2D::pathToGeometrySink(path, objects.sink, transform);
+            direct2d::pathToGeometrySink(path, objects.sink, transform);
 
             return { (ID2D1Geometry*)objects.geometry };
         }
@@ -469,7 +474,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             auto scaledWidth = roundToInt(bufferBounds.getWidth() * dpiScalingFactor);
             auto scaledHeight = roundToInt(bufferBounds.getHeight() * dpiScalingFactor);
             auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
-            partialRepaintReady = false;
 
             if (SUCCEEDED(hr))
             {
@@ -486,8 +490,47 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return false;
     }
 
+    void addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
+    {
+        DBG("   addDeferredRepaint " << deferredRepaint.toString());
+        deferredRepaints.add(deferredRepaint);
+    }
+
+    void refreshWindowUpdateRegion()
+    {
+        updateRegion.getWindowUpdateRegion(hwnd);
+        DBG("updateRegion");
+#if JUCE_DEBUG
+        for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
+        {
+            auto rect = updateRegion.getRECTArray() + i;
+            DBG(i << " " << direct2d::RECTToRectangle<int>(rect).toString());
+        }
+#endif
+    }
+
+    void clearUpdateRegionAndDeferredRepaints()
+    {
+        updateRegion.clear();
+        deferredRepaints.clear();
+    }
+
     void startRender()
     {
+        DBG("startRender");
+#if JUCE_DEBUG
+        for (auto const deferredRepaint : deferredRepaints)
+        {
+            DBG("   deferred " << deferredRepaint.toString());
+        }
+
+        for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
+        {
+            auto rect = updateRegion.getRECTArray() + i;
+            DBG("   update " << direct2d::RECTToRectangle<int>(rect).toString());
+        }
+#endif
+
         createDeviceContext();
         if (deviceContext != nullptr)
         {
@@ -500,10 +543,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         }
     }
 
-    void finishRender(Rectangle<int>* updateRect)
+    void finishRender()
     {
-        ignoreUnused(updateRect);
-
         if (deviceContext != nullptr && swapChain != nullptr)
         {
             auto hr = deviceContext->EndDraw();
@@ -512,7 +553,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
             if (SUCCEEDED(hr))
             {
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
+#if 0 // JUCE_DIRECT2D_PARTIAL_REPAINT
                 if (updateRect != nullptr && !updateRect->isEmpty() && bufferBounds.contains(*updateRect))
                 {
                     RECT dirtyRectangle
@@ -551,9 +592,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 #endif
                 {
                     hr = swapChain->Present(presentSyncInterval, presentFlags);
-                    partialRepaintReady = true;
 
-                    ValidateRect(hwnd, nullptr);
+                    ValidateRgn(hwnd, updateRegion.regionHandle);
                 }
             }
 
@@ -562,11 +602,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                 releaseDeviceContext();
             }
         }
-    }
 
-    bool canPartiallyRepaint(Rectangle<int> partialRepaintArea) const
-    {
-        return false;// renderTarget->canPartiallyRepaint(partialRepaintArea);
+        DBG("finishRender\n");
+
+        updateRegion.clear();
+        deferredRepaints.clear();
     }
 
     void setScaleFactor(double scale_)
@@ -596,7 +636,8 @@ private:
     uint32 const swapChainFlags;
     uint32 const presentSyncInterval;
     uint32 const presentFlags;
-    bool partialRepaintReady = false;
+    direct2d::UpdateRegion updateRegion;
+    juce::RectangleList<int> deferredRepaints;
     ComSmartPtr<ID2D1DeviceContext> deviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
@@ -658,8 +699,6 @@ private:
                                     nullptr,
                                     swapChain.resetAndGetPointerAddress());
 
-                                partialRepaintReady = false;
-
                                 if (SUCCEEDED(hr))
                                 {
                                     ComSmartPtr<ID2D1Device> direct2DDevice;
@@ -719,7 +758,6 @@ private:
         swapChainBuffer = nullptr;
         swapChain = nullptr;
         deviceContext = nullptr;
-        partialRepaintReady = false;
     }
 
     void createSwapChainBuffer()
@@ -818,7 +856,7 @@ public:
     {
         if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
-            deviceContext->PushAxisAlignedClip(Direct2D::rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            deviceContext->PushAxisAlignedClip(direct2d::rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
             pushedLayers.add(new AxisAlignedClipLayer{ deviceContext });
         }
@@ -905,7 +943,7 @@ public:
             }
             else if (fillType.isTiledImage())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix (fillType.transform) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), direct2d::transformToMatrix (fillType.transform) };
                 auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
 
                 auto image = fillType.image;
@@ -933,14 +971,14 @@ public:
             }
             else if (fillType.isGradient())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), Direct2D::transformToMatrix(fillType.transform) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), direct2d::transformToMatrix(fillType.transform) };
                 const int numColors = fillType.gradient->getNumColours();
 
                 HeapBlock<D2D1_GRADIENT_STOP> stops (numColors);
 
                 for (int i = fillType.gradient->getNumColours(); --i >= 0;)
                 {
-                    stops[i].color = Direct2D::colourToD2D (fillType.gradient->getColour (i));
+                    stops[i].color = direct2d::colourToD2D (fillType.gradient->getColour (i));
                     stops[i].position = (FLOAT) fillType.gradient->getColourPosition (i);
                 }
 
@@ -983,7 +1021,7 @@ public:
     {
         if (auto colourBrush = owner.pimpl->getColourBrush())
         {
-            auto colour = Direct2D::colourToD2D(fillType.colour);
+            auto colour = direct2d::colourToD2D(fillType.colour);
             colourBrush->SetColor(colour);
 
             colourBrush->SetOpacity(fillType.getOpacity());
@@ -1057,7 +1095,7 @@ public:
 //==============================================================================
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported())),
+      pimpl (new Pimpl(hwnd_, direct2d::isTearingSupported())),
       stats(stats_)
 {
     resized();
@@ -1073,14 +1111,34 @@ bool Direct2DLowLevelGraphicsContext::resized()
     return pimpl->resized();
 }
 
-void Direct2DLowLevelGraphicsContext::start()
+void Direct2DLowLevelGraphicsContext::addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
 {
+    pimpl->addDeferredRepaint(deferredRepaint);
+
+    triggerAsyncUpdate();
+}
+
+void Direct2DLowLevelGraphicsContext::startPartialPaint()
+{
+    pimpl->refreshWindowUpdateRegion();
+
+    pimpl->startRender();
+
+    saveState();
+
+    // xxx clip here
+}
+
+void Direct2DLowLevelGraphicsContext::startFullPaint()
+{
+    pimpl->clearUpdateRegionAndDeferredRepaints();
+
     pimpl->startRender();
 
     saveState();
 }
 
-void Direct2DLowLevelGraphicsContext::end(Rectangle<int>* updateRect)
+void Direct2DLowLevelGraphicsContext::end()
 {
     while (states.size() > 0)
     {
@@ -1088,7 +1146,9 @@ void Direct2DLowLevelGraphicsContext::end(Rectangle<int>* updateRect)
     }
     currentState = nullptr;
 
-    pimpl->finishRender(updateRect);
+    pimpl->finishRender();
+
+    // xxx may need to validate entire window here instead of ValidateRgn
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
@@ -1115,7 +1175,7 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
     auto transformedR = r.transformedBy(currentTransform);
     transformedR.intersectRectangle(currentState->clipRegion);
 
-    if (Direct2D::isTransformOnlyTranslationOrScale(currentTransform))
+    if (direct2d::isTransformOnlyTranslationOrScale(currentTransform))
     {
         //
         // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)
@@ -1182,7 +1242,7 @@ void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage
         ComSmartPtr<ID2D1Bitmap> bitmap;
         ComSmartPtr<ID2D1BitmapBrush> brush;
 
-        D2D1_BRUSH_PROPERTIES brushProps = { 1, Direct2D::transformToMatrix(chainedTransform) };
+        D2D1_BRUSH_PROPERTIES brushProps = { 1, direct2d::transformToMatrix(chainedTransform) };
         auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
         auto bp = D2D1::BitmapProperties();
 
@@ -1283,8 +1343,8 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
-        deviceContext->FillRectangle(Direct2D::rectangleToRectF(r), currentState->currentBrush);
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->FillRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
     }
 }
@@ -1300,8 +1360,8 @@ bool Direct2DLowLevelGraphicsContext::drawRect(const Rectangle<float>& r, float 
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
-        deviceContext->DrawRectangle(Direct2D::rectangleToRectF(r), currentState->currentBrush, lineThickness);
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->DrawRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush, lineThickness);
         deviceContext->SetTransform(D2D1::IdentityMatrix());
 
         return true;
@@ -1317,7 +1377,7 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
         currentState->createBrush();
         if (auto geometry = pimpl->pathToPathGeometry(p, transform))
         {
-            deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+            deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
             deviceContext->FillGeometry(geometry, currentState->currentBrush);
             deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
@@ -1397,7 +1457,7 @@ bool Direct2DLowLevelGraphicsContext::drawPath(const Path& p, const PathStrokeTy
                 nullptr, 0,
                 pimpl->strokeStyle.resetAndGetPointerAddress());
 
-            deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+            deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
             deviceContext->DrawGeometry(geometry, currentState->currentBrush, strokeType.getStrokeThickness(), pimpl->strokeStyle);
             deviceContext->SetTransform(D2D1::IdentityMatrix());
 
@@ -1412,7 +1472,7 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
 
         D2D1_SIZE_U size = { (UINT32)image.getWidth(), (UINT32)image.getHeight() };
         auto bp = D2D1::BitmapProperties();
@@ -1439,7 +1499,7 @@ void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
         currentState->createBrush();
 
         deviceContext->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
@@ -1472,7 +1532,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
         auto hScale = currentState->font.getHorizontalScale();
         auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
         auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
-        deviceContext->SetTransform(Direct2D::transformToMatrix(deviceContextTransform));
+        deviceContext->SetTransform(direct2d::transformToMatrix(deviceContextTransform));
 
         const auto glyphIndices = (UINT16)glyphNumber;
         const auto glyphAdvances = 0.0f;
@@ -1493,7 +1553,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
         //
         D2D1::Matrix3x2F brushTransform;
         currentState->currentBrush->GetTransform(&brushTransform);
-        currentState->currentBrush->SetTransform(Direct2D::transformToMatrix(scaledTransform.inverted()));
+        currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
 
         deviceContext->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
 
@@ -1506,7 +1566,7 @@ bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& te
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
 
         DirectWriteTypeLayout::drawToD2DContext(text, area,
             *(deviceContext),
@@ -1529,21 +1589,16 @@ double Direct2DLowLevelGraphicsContext::getScaleFactor() const
     return pimpl->getScaleFactor();
 }
 
-bool Direct2DLowLevelGraphicsContext::canPartiallyRepaint(Rectangle<int> partialRepaintArea) const
-{
-    return pimpl->canPartiallyRepaint(partialRepaintArea);
-}
-
 bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness)
 {
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
 
         D2D1_ROUNDED_RECT roundedRect
         {
-            Direct2D::rectangleToRectF(area),
+            direct2d::rectangleToRectF(area),
             cornerSize, cornerSize
         };
         deviceContext->DrawRoundedRectangle(roundedRect, currentState->currentBrush, lineThickness);
@@ -1560,11 +1615,11 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
         
         D2D1_ROUNDED_RECT roundedRect
         {
-            Direct2D::rectangleToRectF(area),
+            direct2d::rectangleToRectF(area),
             cornerSize, cornerSize
         };
         deviceContext->FillRoundedRectangle(roundedRect, currentState->currentBrush);
@@ -1581,7 +1636,7 @@ bool Direct2DLowLevelGraphicsContext::drawEllipse(Rectangle<float> area, float l
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
 
         D2D1_ELLIPSE ellipse
         {
@@ -1602,7 +1657,7 @@ bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
-        deviceContext->SetTransform(Direct2D::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
 
         D2D1_ELLIPSE ellipse
         {
@@ -1616,6 +1671,14 @@ bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
     }
 
     return false;
+}
+
+void Direct2DLowLevelGraphicsContext::handleAsyncUpdate()
+{
+    if (onPaintReady)
+    {
+        onPaintReady();
+    }
 }
 
 #if 0 // JUCE_DEBUG
@@ -1649,7 +1712,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun,
 
         auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
         auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
-        deviceContext->SetTransform(Direct2D::transformToMatrix(deviceContextTransform));
+        deviceContext->SetTransform(direct2d::transformToMatrix(deviceContextTransform));
 
         //printTransform("   deviceContextTransform ", deviceContextTransform);
 
@@ -1680,7 +1743,7 @@ void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun,
         //
         D2D1::Matrix3x2F brushTransform;
         currentState->currentBrush->GetTransform(&brushTransform);
-        currentState->currentBrush->SetTransform(Direct2D::transformToMatrix(scaledTransform.inverted()));
+        currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
 
         deviceContext->DrawGlyphRun({}, &directWriteGlyphRun, currentState->currentBrush);
 
