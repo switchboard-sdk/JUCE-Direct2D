@@ -79,9 +79,19 @@
         clear update region
     }
 
-    d2dPaintAsync()
+    addDeferredRepaint(area)
     {
-        asyncUpdate()
+        deferredRepaints.add(area);
+
+        if (presentation ready)
+        {
+            draw this area after the presentation is done
+        }
+
+        if (update region not empty)
+        {
+            asyncUpdate()
+        }
     }
 
 
@@ -89,17 +99,13 @@
     ----
     WM_PAINT
         get update region from window
-        add update region to D2D pending updates
+        addDeferredRepaint(region)
         validate update region
 
         d2dPaintSync()
 
-
     repaint
-        add update region to D2D pending updates
-        
-        d2dPaintAsync()
-
+        addDeferredRepaint(area)
 
     performAnyPendingRepaintsNow
         d2dPaintSync()
@@ -115,6 +121,12 @@ namespace juce
         D2D1_RECT_F rectangleToRectF(const Rectangle<Type>& r)
         {
             return { (float)r.getX(), (float)r.getY(), (float)r.getRight(), (float)r.getBottom() };
+        }
+
+        template <typename Type>
+        Rectangle<int> RECTToRectangle(const RECT* const r)
+        {
+            return Rectangle<int>::leftTopRightBottom(r->left, r->top, r->right, r->bottom);
         }
 
         static D2D1_COLOR_F colourToD2D(Colour c)
@@ -243,6 +255,72 @@ namespace juce
 
             return false;
         }
+
+        class UpdateRegion
+        {
+        public:
+            void getWindowUpdateRegion(HWND windowHandle)
+            {
+                numRect = 0;
+
+                regionHandle = CreateRectRgn(0, 0, 0, 0);
+                auto regionType = GetUpdateRgn(windowHandle, regionHandle, false);
+                if (regionType == SIMPLEREGION || regionType == COMPLEXREGION)
+                {
+                    auto regionDataBytes = GetRegionData(regionHandle, (DWORD)block.getSize(), (RGNDATA*)block.getData());
+                    if (regionDataBytes > block.getSize())
+                    {
+                        block.ensureSize(regionDataBytes);
+                        regionDataBytes = GetRegionData(regionHandle, (DWORD)block.getSize(), (RGNDATA*)block.getData());
+                    }
+
+                    if (regionDataBytes > 0)
+                    {
+                        auto header = (RGNDATAHEADER const* const)block.getData();
+                        if (header->iType == RDH_RECTANGLES)
+                        {
+                            numRect = header->nCount;
+                        }
+                    }
+                }
+            }
+
+            void clear()
+            {
+                numRect = 0;
+                DeleteObject(regionHandle);
+                regionHandle = nullptr;
+            }
+
+            uint32 getNumRECT() const
+            {
+                return numRect;
+            }
+
+            RECT* getRECTArray()
+            {
+                auto header = (RGNDATAHEADER const* const)block.getData();
+                return (RECT*)(header + 1);
+            }
+
+            void toRectangleList(RectangleList<int>& rectangleList)
+            {
+                jassert(rectangleList.getNumRectangles() == 0);
+
+                rectangleList.ensureStorageAllocated(getNumRECT());
+                for (uint32 i = 0; i < getNumRECT(); ++i)
+                {
+                    auto rect = getRECTArray() + i;
+                    rectangleList.add(RECTToRectangle<int>(rect));
+                }
+            }
+
+            HRGN regionHandle = nullptr;
+
+        private:
+            MemoryBlock block{ 1024 };
+            uint32 numRect = 0;
+        };
 
     } // namespace Direct2D
 
