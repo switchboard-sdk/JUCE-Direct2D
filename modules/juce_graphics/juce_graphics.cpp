@@ -160,7 +160,6 @@
  #include "native/juce_win32_Fonts.cpp"
  #include "native/juce_win32_IconHelpers.cpp"
  #if JUCE_DIRECT2D
-  #include "native/juce_win32_Direct2DRenderTarget.cpp"
   #include "native/juce_win32_Direct2DGraphicsContext.cpp"
  #endif
 

@@ -31,10 +31,35 @@ class HWND__; // Forward or never
 typedef HWND__* HWND;
 #endif
 
+struct PaintStats
+{
+    enum
+    {
+        paintDuration,
+        paintInterval,
+        present,
+        numStats
+    };
+
+    StatisticsAccumulator<double> accumulators[numStats];
+    int paintCount = 0;
+    int64 lastPaintStartTicks = 0;
+
+    void reset()
+    {
+        for (auto& accumulator : accumulators)
+        {
+            accumulator.reset();
+        }
+        lastPaintStartTicks = 0;
+        paintCount = 0;
+    }
+};
+
 class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext
 {
 public:
-    Direct2DLowLevelGraphicsContext(HWND);
+    Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_);
     ~Direct2DLowLevelGraphicsContext();
 
     //==============================================================================
@@ -101,6 +126,8 @@ public:
     //==============================================================================
 private:
     struct SavedState;
+
+    PaintStats& stats;
 
     SavedState* currentState;
     OwnedArray<SavedState> states;

@@ -23,6 +23,89 @@
   ==============================================================================
 */
 
+/*
+
+    Presentation thread
+    -------------------
+    while (thread running)
+    {
+        while()
+        {
+            wait(-1);
+
+            if (presentationReady)  <--- atomic flag
+            {
+                trylock
+
+                present();  // full window
+                asyncUpdate();
+                break;
+            }
+        }
+
+        while()
+        {
+            wait(-1);
+
+            if (presentationReady)
+            {
+                trylock
+
+                present1(presentation region);
+                asyncUpdate();
+            }
+        }
+    }
+
+    asyncUpdate()
+    {
+        d2dPaintSync();
+    }
+
+    d2dPaintSync()
+    {
+        lock
+
+        if (presentationReady || update region empty)
+        {
+            return;
+        }
+
+        paint update region
+        presentationReady = true;
+        presentation region = update region
+        notify presentation thread
+
+        clear update region
+    }
+
+    d2dPaintAsync()
+    {
+        asyncUpdate()
+    }
+
+
+    Peer
+    ----
+    WM_PAINT
+        get update region from window
+        add update region to D2D pending updates
+        validate update region
+
+        d2dPaintSync()
+
+
+    repaint
+        add update region to D2D pending updates
+        
+        d2dPaintAsync()
+
+
+    performAnyPendingRepaintsNow
+        d2dPaintSync()
+
+*/
+
 namespace juce
 {
 
@@ -894,9 +977,10 @@ public:
 };
 
 //==============================================================================
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported()))
+      pimpl (new Pimpl(hwnd_, Direct2D::isTearingSupported())),
+      stats(stats_)
 {
     resized();
 }

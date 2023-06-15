@@ -542,16 +542,7 @@ public:
     /** Returns the style requested for this app. */
     Style getAppStyle() const { return style; }
 
-    StatisticsAccumulator<double> measuredPaintDurationSeconds;
-    StatisticsAccumulator<double> measuredPaintIntervalSeconds;
-    int paintCount = 0;
-    void resetStats()
-    {
-        measuredPaintDurationSeconds.reset();
-        measuredPaintIntervalSeconds.reset();
-        lastPaintStartTicks = 0;
-        paintCount = 0;
-    }
+    PaintStats stats;
 
 protected:
     //==============================================================================
@@ -565,8 +556,6 @@ protected:
     ListenerList<ScaleFactorListener> scaleFactorListeners;
     ListenerList<VBlankListener> vBlankListeners;
     Style style = Style::automatic;
-
-    int64 lastPaintStartTicks = 0;
 
 private:
     //==============================================================================

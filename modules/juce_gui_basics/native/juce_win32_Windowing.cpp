@@ -1420,6 +1420,8 @@ private:
 };
 
 //==============================================================================
+#if JUCE_WAIT_FOR_VBLANK
+
 static HMONITOR getMonitorFromOutput (ComSmartPtr<IDXGIOutput> output)
 {
     DXGI_OUTPUT_DESC desc = {};
@@ -1520,8 +1522,6 @@ private:
 };
 
 //==============================================================================
-
-#if JUCE_WAIT_FOR_VBLANK
 
 class VBlankDispatcher : public DeletedAtShutdown
 {
@@ -1662,7 +1662,7 @@ private:
 
 JUCE_IMPLEMENT_SINGLETON (VBlankDispatcher)
 
-#endif
+#endif // JUCE_WAIT_FOR_VBLANK
 
 //==============================================================================
 class SimpleTimer  : private Timer
@@ -2165,12 +2165,24 @@ public:
 #else
     void repaint(const Rectangle<int>& area) override
     {
-        auto r = RECTFromRectangle(area);
-        InvalidateRect(hwnd, &r, FALSE);
+#if JUCE_DIRECT2D
+        if (direct2DContext)
+        {
+            deferredRepaints.add((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
+        }
+        else
+#endif
+        {
+            auto r = RECTFromRectangle(area);
+            InvalidateRect(hwnd, &r, FALSE);
+        }
     }
 
     void performAnyPendingRepaintsNow() override
     {
+        if (component.isVisible())
+        {
+        }
     }
 #endif
 
@@ -2877,50 +2889,27 @@ private:
 
         auto finishPaintTicks = juce::Time::getHighResolutionTicks();
 
-        measuredPaintDurationSeconds.addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
-        if (lastPaintStartTicks != 0)
+        if (stats.lastPaintStartTicks != 0)
         {
-            measuredPaintIntervalSeconds.addValue(Time::highResolutionTicksToSeconds(startPaintTicks - lastPaintStartTicks));
+            stats.accumulators[PaintStats::paintDuration].addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
+            stats.accumulators[PaintStats::paintInterval].addValue(Time::highResolutionTicksToSeconds(startPaintTicks - stats.lastPaintStartTicks));
         }
-        lastPaintStartTicks = startPaintTicks;
+        stats.lastPaintStartTicks = startPaintTicks;
     }
+
 
 #if JUCE_DIRECT2D
     void handleDirect2DPaint()
     {
         jassert(direct2DContext);
 
-#if JUCE_DIRECT2D_PARTIAL_REPAINT
-        //
-        // Paint the update region
-        //
-        {
-            RECT physicalScreenUpdateRect;
-            if (GetUpdateRect(hwnd, &physicalScreenUpdateRect, false))
-            {
-                auto logicalUpdateRect = convertPhysicalScreenRectangleToLogical(rectangleFromRECT(physicalScreenUpdateRect), hwnd);
-                if (direct2DContext->canPartiallyRepaint(logicalUpdateRect))
-                {
-                    direct2DContext->start();
-                    direct2DContext->clipToRectangle(logicalUpdateRect);
-                    handlePaint(*direct2DContext);
-                    direct2DContext->end(&logicalUpdateRect);
-                    return;
-                }
-            }
-        }
-#endif
-
-        //
-        // Paint the whole window
-        //
         direct2DContext->start();
         handlePaint(*direct2DContext);
         direct2DContext->end();
     }
 #endif
-
-    void performPaint (HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
+    
+    void performPaint(HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
     {
         int x = paintStruct.rcPaint.left;
         int y = paintStruct.rcPaint.top;
@@ -3056,7 +3045,7 @@ private:
         }
         else if (direct2DContext == nullptr)
         {
-            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd);
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, stats);
             direct2DContext->setScaleFactor(getPlatformScaleFactor());
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
@@ -4103,7 +4092,7 @@ private:
             //==============================================================================
 
             case WM_PAINT:
-                paintCount++;
+                stats.paintCount++;
                 handlePaintMessage();
                 return 0;
 
@@ -4788,9 +4777,8 @@ private:
     IMEHandler imeHandler;
     bool shouldIgnoreModalDismiss = false;
 
-#if JUCE_WAIT_FOR_VBLANK
     RectangleList<int> deferredRepaints;
-#endif
+
     ScopedSuspendResumeNotificationRegistration suspendResumeRegistration;
     std::optional<SimpleTimer> monitorUpdateTimer;
 
