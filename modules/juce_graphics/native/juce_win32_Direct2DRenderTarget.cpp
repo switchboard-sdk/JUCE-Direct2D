@@ -1,3 +1,4 @@
+#if 0
 
 namespace juce
 {
@@ -183,13 +184,7 @@ namespace juce
                 return colourBrush;
             }
 
-            Rectangle<int> getClientRect() const
-            {
-                RECT windowRect;
-                GetClientRect(windowHandle, &windowRect);
-                
-                return juce::Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
-            }
+
 
         private:
             HWND const windowHandle;
@@ -360,3 +355,4 @@ namespace juce
     } // namespace Direct2D
 
 }
+#endif
