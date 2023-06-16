@@ -2915,9 +2915,14 @@ private:
     {
         jassert(direct2DContext);
 
-        direct2DContext->startPartialPaint();
-        handlePaint(*direct2DContext);
-        direct2DContext->end();
+        //
+        // Start partial paint returns true if there are any areas to be painted
+        //
+        if (direct2DContext->startPartialPaint())
+        {
+            handlePaint(*direct2DContext);
+            direct2DContext->end();
+        }
     }
 #endif
     
@@ -3062,7 +3067,13 @@ private:
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
 
-            direct2DContext->onPaintReady = [this]() { handleDirect2DPaint(); };
+            direct2DContext->onPaintReady = [this]() 
+            { 
+                if (direct2DContext->needsRepaint())
+                {
+                    handlePaintMessage();
+                }
+            };
         }
 
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);

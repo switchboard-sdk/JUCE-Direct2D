@@ -111,7 +111,8 @@ public:
     bool resized();
 
     void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
-    void startPartialPaint();
+    bool needsRepaint();
+    bool startPartialPaint();
     void startFullPaint();
     void end();
 

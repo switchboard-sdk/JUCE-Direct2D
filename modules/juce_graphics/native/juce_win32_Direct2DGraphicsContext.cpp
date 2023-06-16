@@ -334,11 +334,12 @@ namespace juce
 
 //==============================================================================
 
-struct Direct2DLowLevelGraphicsContext::Pimpl
+struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 {
-    Pimpl(HWND hwnd_, bool tearingSupported_, PaintStats& stats_) :
+    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
+        Thread("Direct2DLowLevelGraphicsContext"),
+        owner(owner_),
         hwnd(hwnd_),
-        stats(stats_),
         swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
         bufferCount(2),
         dxgiScaling(DXGI_SCALING_STRETCH),
@@ -354,6 +355,13 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
         jassertquiet(SUCCEEDED(hr));
+
+        startThread(Priority::highest);
+    }
+
+    ~Pimpl() override
+    {
+        stopThread(1000);
     }
 
     //
@@ -450,6 +458,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
     bool resized()
     {
+        ScopedLock locker{ lock };
+
         //
         // Get the width & height from the client area; make sure width and height are between 1 and 16384
         //
@@ -525,9 +535,39 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         if (deviceContext != nullptr && swapChain != nullptr)
         {
             auto hr = deviceContext->EndDraw();
-
             deviceContext->SetTarget(nullptr);
 
+            auto deferredRepaintsBounds = deferredRepaints.getBounds();
+            if (!bufferBounds.intersects(deferredRepaintsBounds) || deferredRepaintsBounds.isEmpty())
+            {
+                return;
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                {
+                    //ScopedLock locker{ lock };
+
+                    dirtyRectangles.ensureStorageAllocated(deferredRepaints.getNumRectangles());
+                    dirtyRectangles.clearQuick();
+
+                    for (auto const& deferredRepaint : deferredRepaints)
+                    {
+                        dirtyRectangles.add(direct2d::rectangleToRECT(deferredRepaint));
+                    }
+                }
+
+                presentationReady.set(true);
+                notify();
+                ValidateRect(hwnd, nullptr); // xxx ??? ValidateRgn? earlier?
+            }
+
+            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+            {
+                releaseDeviceContext();
+            }
+
+#if 0
             if (SUCCEEDED(hr))
             {
                 auto deferredRepaintsBounds = deferredRepaints.getBounds();
@@ -562,14 +602,15 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
                     hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                     jassert(SUCCEEDED(hr));
 
-                    ValidateRgn(hwnd, updateRegion.regionHandle);
+                    ???
+                    //ValidateRgn(hwnd, updateRegion.regionHandle);
 
                     stats.presentCount++;
                 }
                 else
                 {
                     hr = swapChain->Present(presentSyncInterval, presentFlags);
-                    ValidateRect(hwnd, nullptr);
+                    //ValidateRect(hwnd, nullptr);
                 
                     swapChainPartialPresentReady = true;
                     stats.presentCount++;
@@ -581,9 +622,88 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             {
                 releaseDeviceContext();
             }
+#endif
         }
 
         //DBG("finishRender\n");
+    }
+
+    void run() override
+    {
+        bool fullPresentDone = false;
+
+        while (!threadShouldExit())
+        {
+            wait(-1);
+
+            if (presentationReady.get() == false)
+            {
+                continue;
+            }
+
+            HRESULT hr = 0;
+
+            {
+                juce::ScopedTryLock locker{ lock };
+
+                if (locker.isLocked() && swapChain)
+                {
+                    if (fullPresentDone)
+                    {
+                        DXGI_PRESENT_PARAMETERS presentParameters
+                        {
+                            (uint32)dirtyRectangles.size(),
+                            dirtyRectangles.getRawDataPointer(),
+                            nullptr,
+                            nullptr
+                        };
+
+                        hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                        jassert(SUCCEEDED(hr));
+                    }
+                    else
+                    {
+                        hr = swapChain->Present(presentSyncInterval, presentFlags);
+                        fullPresentDone = true;
+                    }
+
+                    owner.stats.presentCount++;
+                }
+
+                presentationReady = false;
+            }
+
+            if (SUCCEEDED(hr))
+            {
+                struct PaintReadyMessage : public CallbackMessage
+                {
+                    PaintReadyMessage(Pimpl* that_) : that(that_) {}
+                    ~PaintReadyMessage() override = default;
+
+                    void messageCallback() override
+                    {
+                        if (that && that->owner.onPaintReady)
+                        {
+                            that->owner.onPaintReady();
+                        }
+                    }
+
+                    WeakReference<Pimpl> that;
+                };
+
+                (new PaintReadyMessage{ this })->post();
+                continue;
+            }
+
+            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+            {
+                fullPresentDone = false;
+                MessageManager::callAsync([this]()
+                    {
+                        releaseDeviceContext();
+                    });
+            }
+        }
     }
 
     void setScaleFactor(double scale_)
@@ -608,8 +728,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
     juce::RectangleList<int> deferredRepaints;
 
 private:
+    Direct2DLowLevelGraphicsContext& owner;
+    CriticalSection lock;
     DXGI_SWAP_EFFECT const swapEffect;
-    PaintStats& stats;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
     double dpiScalingFactor = 1.0;
@@ -620,7 +741,7 @@ private:
     ComSmartPtr<ID2D1DeviceContext> deviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
-    bool swapChainPartialPresentReady = false;
+    Atomic<bool> presentationReady = false;
     Array<RECT> dirtyRectangles;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
     ComSmartPtr<IDCompositionDevice> compositionDevice;
@@ -629,6 +750,8 @@ private:
 
     void createDeviceContext()
     {
+        ScopedLock locker{ lock };
+
         if (d2dDedicatedFactory != nullptr)
         {
             if (deviceContext == nullptr)
@@ -735,15 +858,18 @@ private:
 
     void releaseDeviceContext()
     {
+        ScopedLock locker{ lock };
+
         colourBrush = nullptr;
         swapChainBuffer = nullptr;
         swapChain = nullptr;
         deviceContext = nullptr;
-        swapChainPartialPresentReady = false;
     }
 
     void createSwapChainBuffer()
     {
+        ScopedLock locker{ lock };
+
         if (deviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
         {
             ComSmartPtr<IDXGISurface> surface;
@@ -769,6 +895,8 @@ private:
             deviceContext->SetDpi(scaledDPI, scaledDPI);
         }
     }
+
+    JUCE_DECLARE_WEAK_REFERENCEABLE(Pimpl)
 };
 
 //==============================================================================
@@ -1077,7 +1205,7 @@ public:
 //==============================================================================
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, direct2d::isTearingSupported(), stats_)),
+      pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported())),
       stats(stats_)
 {
     resized();
@@ -1101,9 +1229,22 @@ void Direct2DLowLevelGraphicsContext::addDeferredRepaint(juce::Rectangle<int> de
     triggerAsyncUpdate();
 }
 
-void Direct2DLowLevelGraphicsContext::startPartialPaint()
+bool Direct2DLowLevelGraphicsContext::needsRepaint()
 {
     pimpl->updateRegion.refresh(pimpl->hwnd);
+
+    return pimpl->updateRegion.getNumRECT() > 0 || pimpl->deferredRepaints.getNumRectangles() > 0;
+}
+
+bool Direct2DLowLevelGraphicsContext::startPartialPaint()
+{
+    pimpl->updateRegion.refresh(pimpl->hwnd);
+
+    if (pimpl->updateRegion.getNumRECT() == 0 && pimpl->deferredRepaints.getNumRectangles() == 0)
+    {
+        return false;
+    }
+
     pimpl->updateRegion.addToRectangleList(pimpl->deferredRepaints);
 
     pimpl->startRender();
@@ -1116,6 +1257,8 @@ void Direct2DLowLevelGraphicsContext::startPartialPaint()
         clipToRectangle(deferredRepaintsBounds);
         //DBG("      clipRegion " << currentState->clipRegion.toString());
     }
+
+    return true;
 }
 
 void Direct2DLowLevelGraphicsContext::startFullPaint()
