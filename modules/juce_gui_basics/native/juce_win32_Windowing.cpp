@@ -2856,9 +2856,9 @@ private:
     //==============================================================================
     void handlePaintMessage()
     {
+#if JUCE_DIRECT2D
         auto startPaintTicks = juce::Time::getHighResolutionTicks();
 
-#if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
             handleDirect2DPaint();
@@ -2897,6 +2897,7 @@ private:
             lastPaintTime = Time::getMillisecondCounter();
         }
 
+#if JUCE_DIRECT2D
         auto finishPaintTicks = juce::Time::getHighResolutionTicks();
 
         if (stats.lastPaintStartTicks != 0)
@@ -2905,6 +2906,7 @@ private:
             stats.accumulators[PaintStats::paintInterval].addValue(Time::highResolutionTicksToSeconds(startPaintTicks - stats.lastPaintStartTicks));
         }
         stats.lastPaintStartTicks = startPaintTicks;
+#endif
     }
 
 
@@ -4104,7 +4106,9 @@ private:
             //==============================================================================
 
             case WM_PAINT:
+#if JUCE_DIRECT2D
                 stats.paintCount++;
+#endif
                 handlePaintMessage();
                 return 0;
 

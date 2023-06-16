@@ -43,6 +43,7 @@ struct PaintStats
 
     StatisticsAccumulator<double> accumulators[numStats];
     int paintCount = 0;
+    int presentCount = 0;
     int64 lastPaintStartTicks = 0;
 
     void reset()
@@ -53,6 +54,7 @@ struct PaintStats
         }
         lastPaintStartTicks = 0;
         paintCount = 0;
+        presentCount = 0;
     }
 };
 

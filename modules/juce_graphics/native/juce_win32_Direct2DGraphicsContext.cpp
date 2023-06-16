@@ -124,9 +124,15 @@ namespace juce
         }
 
         template <typename Type>
-        Rectangle<int> RECTToRectangle(const RECT* const r)
+        RECT rectangleToRECT(const Rectangle<Type>& r)
         {
-            return Rectangle<int>::leftTopRightBottom(r->left, r->top, r->right, r->bottom);
+            return { r.getX(), r.getY(), r.getRight(), r.getBottom() };
+        }
+
+        template <typename Type>
+        Rectangle<int> RECTToRectangle(RECT const& r)
+        {
+            return Rectangle<int>::leftTopRightBottom(r.left, r.top, r.right, r.bottom);
         }
 
         static D2D1_COLOR_F colourToD2D(Colour c)
@@ -264,7 +270,7 @@ namespace juce
                 clear();
             }
 
-            void getWindowUpdateRegion(HWND windowHandle)
+            void refresh(HWND windowHandle)
             {
                 numRect = 0;
 
@@ -308,15 +314,12 @@ namespace juce
                 return (RECT*)(header + 1);
             }
 
-            void toRectangleList(RectangleList<int>& rectangleList)
+            void addToRectangleList(RectangleList<int>& rectangleList)
             {
-                jassert(rectangleList.getNumRectangles() == 0);
-
-                rectangleList.ensureStorageAllocated(getNumRECT());
+                rectangleList.ensureStorageAllocated(rectangleList.getNumRectangles() + getNumRECT());
                 for (uint32 i = 0; i < getNumRECT(); ++i)
                 {
-                    auto rect = getRECTArray() + i;
-                    rectangleList.add(RECTToRectangle<int>(rect));
+                    rectangleList.add(RECTToRectangle<int>(getRECTArray()[i]));
                 }
             }
 
@@ -333,8 +336,9 @@ namespace juce
 
 struct Direct2DLowLevelGraphicsContext::Pimpl
 {
-    Pimpl(HWND hwnd_, bool tearingSupported_) :
+    Pimpl(HWND hwnd_, bool tearingSupported_, PaintStats& stats_) :
         hwnd(hwnd_),
+        stats(stats_),
         swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
         bufferCount(2),
         dxgiScaling(DXGI_SCALING_STRETCH),
@@ -490,31 +494,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return false;
     }
 
-    void addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
-    {
-        DBG("   addDeferredRepaint " << deferredRepaint.toString());
-        deferredRepaints.add(deferredRepaint);
-    }
-
-    void refreshWindowUpdateRegion()
-    {
-        updateRegion.getWindowUpdateRegion(hwnd);
-        DBG("updateRegion");
-#if JUCE_DEBUG
-        for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
-        {
-            auto rect = updateRegion.getRECTArray() + i;
-            DBG(i << " " << direct2d::RECTToRectangle<int>(rect).toString());
-        }
-#endif
-    }
-
-    void clearUpdateRegionAndDeferredRepaints()
-    {
-        updateRegion.clear();
-        deferredRepaints.clear();
-    }
-
     void startRender()
     {
         DBG("startRender");
@@ -526,8 +505,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
         for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
         {
-            auto rect = updateRegion.getRECTArray() + i;
-            DBG("   update " << direct2d::RECTToRectangle<int>(rect).toString());
+            DBG("   update " << direct2d::RECTToRectangle<int>(updateRegion.getRECTArray()[i]).toString());
         }
 #endif
 
@@ -553,48 +531,50 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
 
             if (SUCCEEDED(hr))
             {
-#if 0 // JUCE_DIRECT2D_PARTIAL_REPAINT
-                if (updateRect != nullptr && !updateRect->isEmpty() && bufferBounds.contains(*updateRect))
+                //auto deferredRepaintsBounds = deferredRepaints.getBounds();
+                //if (swapChainPartialPresentReady && bufferBounds.intersects(deferredRepaintsBounds) && !deferredRepaintsBounds.isEmpty())
+                if (deferredRepaints.getNumRectangles() > 0 && swapChainPartialPresentReady)
                 {
-                    RECT dirtyRectangle
+                    dirtyRectangles.ensureStorageAllocated(deferredRepaints.getNumRectangles());
+                    dirtyRectangles.clearQuick();
+
+                    for (auto const& deferredRepaint : deferredRepaints)
                     {
-                        updateRect->getX(),
-                        updateRect->getY(),
-                        updateRect->getRight(),
-                        updateRect->getBottom()
-                    };
+                        dirtyRectangles.add(direct2d::rectangleToRECT(deferredRepaint));
+                    }
+
                     DXGI_PRESENT_PARAMETERS presentParameters
                     {
-                        1,
-                        &dirtyRectangle,
+                        (uint32)dirtyRectangles.size(),
+                        dirtyRectangles.getRawDataPointer(),
                         nullptr,
                         nullptr
                     };
 
-                    jassert(partialRepaintReady);
+                    jassert(swapChainPartialPresentReady);
+
+                    DBG("   #dirty " << (int)dirtyRectangles.size());
+#if JUCE_DEBUG
+                    for (auto dirtyRectangle : dirtyRectangles)
+                    {
+                        DBG("   " << (int)dirtyRectangle.left << ", " << (int)dirtyRectangle.top << ", " << (int)dirtyRectangle.right << ", " << (int)dirtyRectangle.bottom);
+                    }
+#endif
 
                     hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
-                    if (SUCCEEDED(hr))
-                    {
-                        ValidateRect(hwnd, &dirtyRectangle);
-                    }
-                    else if (DXGI_ERROR_INVALID_CALL == hr)
-                    {
-                        hr = swapChain->Present(presentSyncInterval, presentFlags);
-                        ValidateRect(hwnd, nullptr);
-                    }
-                    else
-                    {
-                        jassertfalse;
-                    }
+                    jassert(SUCCEEDED(hr));
+
+                    stats.presentCount++;
                 }
                 else
-#endif
                 {
                     hr = swapChain->Present(presentSyncInterval, presentFlags);
-
-                    ValidateRgn(hwnd, updateRegion.regionHandle);
+                    ValidateRect(hwnd, nullptr);
+                
+                    swapChainPartialPresentReady = true;
+                    stats.presentCount++;
                 }
+
             }
 
             if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
@@ -603,10 +583,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
             }
         }
 
-        DBG("finishRender\n");
-
-        updateRegion.clear();
-        deferredRepaints.clear();
+        //DBG("finishRender\n");
     }
 
     void setScaleFactor(double scale_)
@@ -622,13 +599,17 @@ struct Direct2DLowLevelGraphicsContext::Pimpl
         return dpiScalingFactor;
     }
 
+    HWND hwnd = nullptr;
     SharedResourcePointer<Direct2DFactories> sharedFactories;
     ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
     ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
 
+    direct2d::UpdateRegion updateRegion;
+    juce::RectangleList<int> deferredRepaints;
+
 private:
-    HWND hwnd = nullptr;
     DXGI_SWAP_EFFECT const swapEffect;
+    PaintStats& stats;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
     double dpiScalingFactor = 1.0;
@@ -636,11 +617,11 @@ private:
     uint32 const swapChainFlags;
     uint32 const presentSyncInterval;
     uint32 const presentFlags;
-    direct2d::UpdateRegion updateRegion;
-    juce::RectangleList<int> deferredRepaints;
     ComSmartPtr<ID2D1DeviceContext> deviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
+    bool swapChainPartialPresentReady = false;
+    Array<RECT> dirtyRectangles;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
     ComSmartPtr<IDCompositionDevice> compositionDevice;
     ComSmartPtr<IDCompositionTarget> compositionTarget;
@@ -758,6 +739,7 @@ private:
         swapChainBuffer = nullptr;
         swapChain = nullptr;
         deviceContext = nullptr;
+        swapChainPartialPresentReady = false;
     }
 
     void createSwapChainBuffer()
@@ -1028,6 +1010,17 @@ public:
         }
     }
 
+    Rectangle<int> intersectClipRegion(Rectangle<int> const area)
+    {
+        //
+        // Update the clipRegion to the intersection of clipRegion and area
+        //
+        auto transformedArea = area.transformedBy(currentTransform.getTransform());
+        transformedArea.intersectRectangle(clipRegion);
+
+        return transformedArea;
+    }
+
     //
     // Layer struct to keep track of pushed Direct2D layers.
     // 
@@ -1095,7 +1088,7 @@ public:
 //==============================================================================
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_)
     : currentState (nullptr),
-      pimpl (new Pimpl(hwnd_, direct2d::isTearingSupported())),
+      pimpl (new Pimpl(hwnd_, direct2d::isTearingSupported(), stats_)),
       stats(stats_)
 {
     resized();
@@ -1113,25 +1106,32 @@ bool Direct2DLowLevelGraphicsContext::resized()
 
 void Direct2DLowLevelGraphicsContext::addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
 {
-    pimpl->addDeferredRepaint(deferredRepaint);
+    pimpl->deferredRepaints.add(deferredRepaint);
 
     triggerAsyncUpdate();
 }
 
 void Direct2DLowLevelGraphicsContext::startPartialPaint()
 {
-    pimpl->refreshWindowUpdateRegion();
+    pimpl->updateRegion.refresh(pimpl->hwnd);
+    pimpl->updateRegion.addToRectangleList(pimpl->deferredRepaints);
 
     pimpl->startRender();
 
     saveState();
 
-    // xxx clip here
+    if (auto deferredRepaintsBounds = pimpl->deferredRepaints.getBounds(); deferredRepaintsBounds.isEmpty() == false)
+    {
+        DBG("   clipping " << deferredRepaintsBounds.toString());
+        currentState->intersectClipRegion(deferredRepaintsBounds);
+        DBG("   clipping " << currentState->clipRegion.toString());
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::startFullPaint()
 {
-    pimpl->clearUpdateRegionAndDeferredRepaints();
+    pimpl->updateRegion.clear();
+    pimpl->deferredRepaints.clear();
 
     pimpl->startRender();
 
@@ -1148,7 +1148,8 @@ void Direct2DLowLevelGraphicsContext::end()
 
     pimpl->finishRender();
 
-    // xxx may need to validate entire window here instead of ValidateRgn
+    pimpl->updateRegion.clear();
+    pimpl->deferredRepaints.clear();
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
@@ -1171,14 +1172,16 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
     //
     // Update the current clip region (only used for getClipBounds)
     //
-    auto currentTransform = currentState->currentTransform.getTransform();
-    auto transformedR = r.transformedBy(currentTransform);
-    transformedR.intersectRectangle(currentState->clipRegion);
+    auto transformedR = currentState->intersectClipRegion(r);
 
+    //
+    // Push a clip layer
+    //
+    auto currentTransform = currentState->currentTransform.getTransform();
     if (direct2d::isTransformOnlyTranslationOrScale(currentTransform))
     {
         //
-        // If the current transform is just a translation, use an axis-aligned clip layer (according to the Direct2D debug layer)
+        // If the clip rectangle will still be a rectangle with vertical and horizontal sides after transformation, then use an axis-aligned clip layer
         //
         currentState->pushAxisAlignedClipLayer(transformedR);
     }
@@ -1195,11 +1198,12 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    auto const currentTransform = currentState->currentTransform.getTransform();
-    auto transformedR = clipRegion.getBounds().transformedBy(currentTransform);
-    transformedR.intersectRectangle(currentState->clipRegion);
+    //
+    // Update the current clip region (only used for getClipBounds)
+    //
+    currentState->intersectClipRegion(clipRegion.getBounds());
 
-    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentTransform, D2D1_FILL_MODE_WINDING));
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_WINDING));
 
     return ! isClipEmpty();
 }
@@ -1684,7 +1688,7 @@ void Direct2DLowLevelGraphicsContext::handleAsyncUpdate()
 #if 0 // JUCE_DEBUG
 void printTransform(StringRef name, AffineTransform const& transform)
 {
-    DBG(name << "  scale:" << transform.getScaleFactor() << "  translate:" << transform.getTranslationX() << " / " << transform.getTranslationY());
+    //DBG(name << "  scale:" << transform.getScaleFactor() << "  translate:" << transform.getTranslationX() << " / " << transform.getTranslationY());
 }
 #endif
 
@@ -1696,11 +1700,11 @@ void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun,
     jassert(currentState->currentFontFace);
 
 #if 0
-    DBG("drawGlyphRun");
+    //DBG("drawGlyphRun");
 
     for (auto const& glyph : glyphRun)
     {
-        DBG("glyph " << glyph.glyphIndex << " x:" << glyph.left << " / " << glyph.baselineY);
+        //DBG("glyph " << glyph.glyphIndex << " x:" << glyph.left << " / " << glyph.baselineY);
     }
 #endif
 
