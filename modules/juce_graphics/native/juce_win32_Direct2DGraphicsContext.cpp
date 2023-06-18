@@ -708,14 +708,14 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             owner.stats.presentCount++;
             if (SUCCEEDED(hr))
             {
-                struct PaintReadyMessage : public CallbackMessage
+                struct PresentDoneMessage : public CallbackMessage
                 {
-                    PaintReadyMessage(Pimpl* that_, Presentation* presentation_) : 
+                    PresentDoneMessage(Pimpl* that_, Presentation* presentation_) : 
                         that(that_),
                         presentation(presentation_) 
                     {
                     }
-                    ~PaintReadyMessage() override = default;
+                    ~PresentDoneMessage() override = default;
 
                     void messageCallback() override
                     {
@@ -737,7 +737,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                     Presentation* presentation;
                 };
 
-                (new PaintReadyMessage{ this, presentation })->post();
+                (new PresentDoneMessage{ this, presentation })->post();
                 continue;
             }
 
