@@ -433,6 +433,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return false;
     }
 
+    juce::Rectangle<int> getBufferBounds() const
+    {
+        return bufferBounds;
+    }
+
     void addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
     {
         auto* const presentation = presentations + presentationIndex;
@@ -501,7 +506,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             createSwapChainBuffer();
             if (swapChainBuffer != nullptr)
             {
-                deviceContext->SetTarget(swapChainBuffer);
+                deviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
+                deviceContext->SetTarget(presentation->commandList);
                 deviceContext->BeginDraw();
             }
         }
@@ -513,14 +519,16 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
     {
         if (deviceContext != nullptr && swapChain != nullptr)
         {
+            auto* const presentation = presentations + presentationIndex;
+
             auto hr = deviceContext->EndDraw();
             deviceContext->SetTarget(nullptr);
+            presentation->commandList->Close();
             if (FAILED(hr))
             {
                 return;
             }
 
-            auto* const presentation = presentations + presentationIndex;
             auto paintBounds = presentation->paintAreas.getBounds();
             if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
             {
@@ -573,6 +581,25 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             }
 
             jassert(presentation->state == Presentation::painted);
+
+            //
+            // Render the command list
+            //
+            if (deviceContext == nullptr ||
+                swapChain == nullptr ||
+                swapChainBuffer == nullptr ||
+                presentation->commandList == nullptr)
+            {
+                presentation->status = E_UNEXPECTED;
+                PresentDoneMessage::createAndPost(this, presentation);
+                continue;
+            }
+
+            deviceContext->SetTarget(swapChainBuffer);
+            deviceContext->BeginDraw();
+            deviceContext->DrawImage(presentation->commandList);
+            presentation->status = deviceContext->EndDraw();
+            deviceContext->SetTarget(nullptr);
             
             //
             // If this swap chain buffer has never been painted, present the entire window
@@ -585,7 +612,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 presentation->presentStartTicks = Time::getHighResolutionTicks();
 #endif
 
-                if (fullPresentDone && !presentation->presentEntireWindow)
+                if (0)//if (fullPresentDone && !presentation->presentEntireWindow)
                 {
                     presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
                     presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
@@ -605,54 +632,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             //
             // Post a message indicating that this presentation is done; ready for the next one
             //
-            {
-                struct PresentDoneMessage : public CallbackMessage
-                {
-                    PresentDoneMessage(Pimpl* that_, Presentation* presentation_) : 
-                        that(that_),
-                        presentation(presentation_) 
-                    {
-                    }
-                    ~PresentDoneMessage() override = default;
-
-                    void messageCallback() override
-                    {
-                        //
-                        // Back on the message thread
-                        //
-                        if (that)
-                        {
-#if JUCE_DIRECT2D_METRICS
-                            that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
-#endif
-                                
-                            if (presentation)
-                            {
-                                //
-                                // Release the device context if Present1 returned an error
-                                //
-                                auto status = presentation->status;
-                                if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
-                                {
-                                    that->releaseDeviceContext();
-                                }
-
-                                presentation->reset();
-                            }
-
-                            if (that->owner.onPaintReady)
-                            {
-                                that->owner.onPaintReady();
-                            }
-                        }
-                    }
-
-                    WeakReference<Pimpl> that;
-                    Presentation* presentation;
-                };
-
-                (new PresentDoneMessage{ this, presentation })->post();
-            }
+            PresentDoneMessage::createAndPost(this, presentation);
         }
     }
 
@@ -699,11 +679,14 @@ private:
 
     struct Presentation
     {
-        int frameNumber = -1;
         HRESULT status = S_OK;
+
+        ComSmartPtr<ID2D1CommandList> commandList;
+        
         bool presentEntireWindow = true;
         juce::RectangleList<int> paintAreas;
         Array<RECT> dirtyRectangles;
+        
         enum State
         {
             clear,
@@ -711,6 +694,7 @@ private:
             painted
         } state = clear;
 
+        int frameNumber = -1;
 #if JUCE_DIRECT2D_METRICS
         int64_t presentStartTicks = 0;
         int64_t presentFinishTicks = 0;
@@ -721,11 +705,62 @@ private:
             state = clear;
             paintAreas.clear();
             dirtyRectangles.clearQuick();
+            commandList = nullptr;
         }
 
     } presentations[2];
     int presentationIndex = 0;
     std::atomic<Presentation*> paintedPresentation = nullptr;
+
+    struct PresentDoneMessage : public CallbackMessage
+    {
+        PresentDoneMessage(Pimpl* that_, Presentation* presentation_) :
+            that(that_),
+            presentation(presentation_)
+        {
+        }
+        ~PresentDoneMessage() override = default;
+
+        void messageCallback() override
+        {
+            //
+            // Back on the message thread
+            //
+            if (that)
+            {
+#if JUCE_DIRECT2D_METRICS
+                that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
+#endif
+
+                if (presentation)
+                {
+                    //
+                    // Release the device context if Present1 returned an error
+                    //
+                    auto status = presentation->status;
+                    if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
+                    {
+                        that->releaseDeviceContext();
+                    }
+
+                    presentation->reset();
+                }
+
+                if (that->owner.onPaintReady)
+                {
+                    that->owner.onPaintReady();
+                }
+            }
+        }
+
+        static void createAndPost(Pimpl* that_, Presentation* presentation_)
+        {
+            (new PresentDoneMessage{ that_, presentation_ })->post();
+        }
+
+        WeakReference<Pimpl> that;
+        Presentation* presentation;
+    };
 
     void createDeviceContext()
     {
@@ -901,8 +936,7 @@ public:
         {
             if (auto deviceContext = owner.pimpl->getDeviceContext())
             {
-                const auto size = deviceContext->GetPixelSize();
-                clipRegion.setSize(size.width, size.height);
+                clipRegion = owner.pimpl->getBufferBounds();
             }
             setFill(FillType(Colours::black));
         }
@@ -1227,7 +1261,7 @@ bool Direct2DLowLevelGraphicsContext::startPartialAsynchronousPaint(int frameNum
         if (initialClipBounds.isEmpty() == false)
         {
             //DBG("   deferredRepaintsBounds " << deferredRepaintsBounds.toString());
-            clipToRectangle(initialClipBounds);
+            //clipToRectangle(initialClipBounds);
             //DBG("      clipRegion " << currentState->clipRegion.toString());
         }
 
@@ -1322,8 +1356,7 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         RectangleList<int> rectangles{ r };
-        auto size = deviceContext->GetPixelSize();
-        rectangles.addWithoutMerging({ 0, 0, (int)size.width, (int)size.height });
+        rectangles.addWithoutMerging(pimpl->getBufferBounds());
 
         currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_ALTERNATE));
     }

@@ -168,7 +168,6 @@ public:
     void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
     bool needsRepaint();
     bool startPartialAsynchronousPaint(int frameNumber);
-    bool startFullAsynchronousPaint(int frameNumber);
     void end();
 
     void setScaleFactor(double scale_);
