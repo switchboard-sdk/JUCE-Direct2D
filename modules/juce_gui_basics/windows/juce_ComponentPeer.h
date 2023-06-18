@@ -542,7 +542,7 @@ public:
     /** Returns the style requested for this app. */
     Style getAppStyle() const { return style; }
 
-#if JUCE_DIRECT2D
+#if JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
     PaintStats stats;
     FrameHistory frameHistory;
 #endif

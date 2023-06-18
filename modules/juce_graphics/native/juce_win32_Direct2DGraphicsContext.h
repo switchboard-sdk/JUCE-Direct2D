@@ -31,6 +31,8 @@ class HWND__; // Forward or never
 typedef HWND__* HWND;
 #endif
 
+#if JUCE_DIRECT2D_METRICS
+
 struct PaintStats
 {
     enum
@@ -105,10 +107,16 @@ private:
     std::deque<FrameTime> frameTimes;
 };
 
+#endif
+
 class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public juce::AsyncUpdater
 {
 public:
+#if JUCE_DIRECT2D_METRICS
     Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_, FrameHistory& frameHistory_);
+#else
+    Direct2DLowLevelGraphicsContext(HWND);
+#endif
     ~Direct2DLowLevelGraphicsContext();
 
     //==============================================================================
@@ -178,7 +186,9 @@ public:
 private:
     struct SavedState;
 
+#if JUCE_DIRECT2D_METRICS
     PaintStats& stats;
+#endif
 
     SavedState* currentState;
     OwnedArray<SavedState> states;

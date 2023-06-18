@@ -1422,6 +1422,8 @@ private:
 //==============================================================================
 #if JUCE_WAIT_FOR_VBLANK
 
+// xxx fix VBlankDispatcher for Direct2D
+
 static HMONITOR getMonitorFromOutput (ComSmartPtr<IDXGIOutput> output)
 {
     DXGI_OUTPUT_DESC desc = {};
@@ -2858,8 +2860,10 @@ private:
     void handlePaintMessage()
     {
 #if JUCE_DIRECT2D
+#if JUCE_DIRECT2D_METRICS
         auto startPaintTicks = juce::Time::getHighResolutionTicks();
         FrameTime frameTime;
+#endif
 
         if (direct2DContext != nullptr)
         {
@@ -2899,7 +2903,7 @@ private:
             lastPaintTime = Time::getMillisecondCounter();
         }
 
-#if JUCE_DIRECT2D
+#if JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
         auto finishPaintTicks = juce::Time::getHighResolutionTicks();
 
         if (stats.lastPaintStartTicks != 0)
@@ -2924,9 +2928,9 @@ private:
         jassert(direct2DContext);
 
         //
-        // Start partial paint returns true if there are any areas to be painted
+        // startPartialAsynchronousPaint returns true if there are any areas to be painted
         //
-        if (direct2DContext->startPartialPaint(frameNumber))
+        if (direct2DContext->startPartialAsynchronousPaint(frameNumber))
         {
             handlePaint(*direct2DContext);
             direct2DContext->end();
@@ -3070,7 +3074,11 @@ private:
         }
         else if (direct2DContext == nullptr)
         {
+#if JUCE_DIRECT2D_METRICS
             direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, stats, frameHistory);
+#else
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd);
+#endif
             direct2DContext->setScaleFactor(getPlatformScaleFactor());
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
@@ -4129,7 +4137,7 @@ private:
             //==============================================================================
 
             case WM_PAINT:
-#if JUCE_DIRECT2D
+#if JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
                 stats.paintCount++;
 #endif
                 handlePaintMessage();

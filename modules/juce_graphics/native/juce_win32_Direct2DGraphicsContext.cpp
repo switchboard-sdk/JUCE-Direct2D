@@ -25,88 +25,14 @@
 
 /*
 
-    Presentation presentations[2];
-    int presentationIndex = 0;
-    std::atomic<Presentation*> paintedPresentation = nullptr;
-
-    while (thread running)
-    {
-        wait(-1);
-
-        Presentation* threadPresentation = paintedPresentation.exchange(nullptr);
-        if (!threadPresentation)
-        {
-            continue;
-        }
-
-        jassert(threadPresentation->isPainted())
-
-        {
-            present();  // full window
-            asyncUpdate();
-        }
-    }
-
-    asyncUpdate()
-    {
-        threadPresentation->state = clear
-
-        jassert(presentations + presentationIndex != threadPresentation)
-
-        d2dPaintSync()
-    }
-
-    d2dPaintSync()
-    {
-        if (!presentations[presentationIndex ^ 1].isClear())
-        {
-            return;
-        }
-
-        Presentation* paintPresentation = presentations + presentationIndex
-
-        jassert(paintPresentation->isClear())
-
-        if (paintPresentation->update area is empty)
-        {
-            return;
-        }
-
-        paintPresentation->state = painting
-
-        paint
-
-        paintPresentation->state = painted
-        paintedPresentation = paintPresentation
-        presentationIndex ^= 1
-
-        notify thread
-    }
-
-    addDeferredRepaint(area)
-    {
-        Presentation* presentation =  presentations[presentationIndex];
-        presentation->add(area)
-
-        jassert(presentation->isClear())
-    }
-
-
-    Peer
-    ----
-    WM_PAINT
-        get update region from window
-        addDeferredRepaint(region)
-        validate update region
-
-        d2dPaintSync()
-
-    repaint
-        addDeferredRepaint(area)
-
-    performAnyPendingRepaintsNow
-        d2dPaintSync()
-
+    -optimize save/restore state?
+    -command list?
+    -vblank attachment
+    -restart render thread on error?
+    -conditional frame stats, frame history
+    -move frame stats, frame history out of peer
+    -minimize calls to SetTransform
+    -text analyzer?
 
 */
 
@@ -334,11 +260,17 @@ namespace juce
 
 struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 {
+#if JUCE_DIRECT2D_METRICS
     Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, FrameHistory& frameHistory_) :
+#else
+    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
+#endif
         Thread("Direct2DLowLevelGraphicsContext"),
-        owner(owner_),
         hwnd(hwnd_),
+        owner(owner_),
+#if JUCE_DIRECT2D_METRICS
         frameHistory(frameHistory_),
+#endif
         swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
         bufferCount(2),
         dxgiScaling(DXGI_SCALING_STRETCH),
@@ -615,63 +547,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             {
                 releaseDeviceContext();
             }
-
-#if 0
-            if (SUCCEEDED(hr))
-            {
-                auto deferredRepaintsBounds = deferredRepaints.getBounds();
-                if (swapChainPartialPresentReady && bufferBounds.intersects(deferredRepaintsBounds) && !deferredRepaintsBounds.isEmpty())
-                {
-                    dirtyRectangles.ensureStorageAllocated(deferredRepaints.getNumRectangles());
-                    dirtyRectangles.clearQuick();
-
-                    for (auto const& deferredRepaint : deferredRepaints)
-                    {
-                        dirtyRectangles.add(direct2d::rectangleToRECT(deferredRepaint));
-                    }
-
-                    DXGI_PRESENT_PARAMETERS presentParameters
-                    {
-                        (uint32)dirtyRectangles.size(),
-                        dirtyRectangles.getRawDataPointer(),
-                        nullptr,
-                        nullptr
-                    };
-
-                    jassert(swapChainPartialPresentReady);
-
-#if 0  // JUCE_DEBUG
-                    DBG("   #dirty " << (int)dirtyRectangles.size());
-                    for (auto dirtyRectangle : dirtyRectangles)
-                    {
-                        DBG("   " << (int)dirtyRectangle.left << ", " << (int)dirtyRectangle.top << ", " << (int)dirtyRectangle.right << ", " << (int)dirtyRectangle.bottom);
-                    }
-#endif
-
-                    hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
-                    jassert(SUCCEEDED(hr));
-
-                    ???
-                    //ValidateRgn(hwnd, updateRegion.regionHandle);
-
-                    stats.presentCount++;
-                }
-                else
-                {
-                    hr = swapChain->Present(presentSyncInterval, presentFlags);
-                    //ValidateRect(hwnd, nullptr);
-                
-                    swapChainPartialPresentReady = true;
-                    stats.presentCount++;
-                }
-
-            }
-
-            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
-            {
-                releaseDeviceContext();
-            }
-#endif
         }
 
         //DBG("finishRender\n");
@@ -803,7 +678,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
+#if JUCE_DIRECT2D_METRICS
     FrameHistory& frameHistory;
+#endif
     DXGI_SWAP_EFFECT const swapEffect;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
@@ -815,7 +692,6 @@ private:
     ComSmartPtr<ID2D1DeviceContext> deviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
-    Array<RECT> dirtyRectangles;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
     ComSmartPtr<IDCompositionDevice> compositionDevice;
     ComSmartPtr<IDCompositionTarget> compositionTarget;
@@ -834,8 +710,11 @@ private:
             painting,
             painted
         } state = clear;
-        juce::RectangleList<int> paintAreas;
-        //ComSmartPtr<ID2D1CommandList> commandList;
+
+#if JUCE_DIRECT2D_METRICS
+        int64_t presentStartTicks = 0;
+        int64_t presentFinishTicks = 0;
+#endif
 
         void reset()
         {
@@ -844,8 +723,6 @@ private:
             dirtyRectangles.clearQuick();
         }
 
-        int64_t presentStartTicks = 0;
-        int64_t presentFinishTicks = 0;
     } presentations[2];
     int presentationIndex = 0;
     std::atomic<Presentation*> paintedPresentation = nullptr;
@@ -1303,10 +1180,16 @@ public:
 };
 
 //==============================================================================
+#if JUCE_DIRECT2D_METRICS
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_, FrameHistory& frameHistory_)
     : currentState (nullptr),
       pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), frameHistory_)),
       stats(stats_)
+#else
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_)
+    : currentState(nullptr),
+    pimpl(new Pimpl(*this, hwnd_, direct2d::isTearingSupported()))
+#endif
 {
     resized();
 }
