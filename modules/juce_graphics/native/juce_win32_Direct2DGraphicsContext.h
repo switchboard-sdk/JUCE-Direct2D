@@ -45,6 +45,7 @@ struct PaintStats
     int paintCount = 0;
     int presentCount = 0;
     int64 lastPaintStartTicks = 0;
+    uint64_t lockAcquireMaxTicks = 0;
 
     void reset()
     {
@@ -55,6 +56,7 @@ struct PaintStats
         lastPaintStartTicks = 0;
         paintCount = 0;
         presentCount = 0;
+        lockAcquireMaxTicks = 0;
     }
 };
 
@@ -113,7 +115,7 @@ public:
     void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
     bool needsRepaint();
     bool startPartialPaint();
-    void startFullPaint();
+    bool startFullPaint();
     void end();
 
     void setScaleFactor(double scale_);

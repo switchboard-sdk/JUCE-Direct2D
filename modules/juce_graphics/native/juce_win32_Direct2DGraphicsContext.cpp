@@ -25,73 +25,70 @@
 
 /*
 
-    Presentation thread
-    -------------------
+    Presentation presentations[2];
+    int presentationIndex = 0;
+    std::atomic<Presentation*> paintedPresentation = nullptr;
+
     while (thread running)
     {
-        while()
+        wait(-1);
+
+        Presentation* threadPresentation = paintedPresentation.exchange(nullptr);
+        if (!threadPresentation)
         {
-            wait(-1);
-
-            if (presentationReady)  <--- atomic flag
-            {
-                trylock
-
-                present();  // full window
-                asyncUpdate();
-                break;
-            }
+            continue;
         }
 
-        while()
+        jassert(threadPresentation->isPainted())
+
         {
-            wait(-1);
-
-            if (presentationReady)
-            {
-                trylock
-
-                present1(presentation region);
-                asyncUpdate();
-            }
+            present();  // full window
+            asyncUpdate();
         }
     }
 
     asyncUpdate()
     {
-        d2dPaintSync();
+        threadPresentation->state = clear
+
+        jassert(presentations + presentationIndex != threadPresentation)
+
+        d2dPaintSync()
     }
 
     d2dPaintSync()
     {
-        lock
-
-        if (presentationReady || update region empty)
+        if (!presentations[presentationIndex ^ 1].isClear())
         {
             return;
         }
 
-        paint update region
-        presentationReady = true;
-        presentation region = update region
-        notify presentation thread
+        Presentation* paintPresentation = presentations + presentationIndex
 
-        clear update region
+        jassert(paintPresentation->isClear())
+
+        if (paintPresentation->update area is empty)
+        {
+            return;
+        }
+
+        paintPresentation->state = painting
+
+        paint
+
+        paintPresentation->state = painted
+        paintedPresentation = paintPresentation
+        presentationIndex ^= 1
+
+        notify thread
     }
 
     addDeferredRepaint(area)
     {
-        deferredRepaints.add(area);
+        Presentation* presentation =  presentations[presentationIndex];
+        presentation->add(area)
 
-        if (presentation ready)
-        {
-            draw this area after the presentation is done
-        }
-
-        if (update region not empty)
-        {
-            asyncUpdate()
-        }
+        jassert(presentation->isClear())
     }
 
 
@@ -109,6 +106,7 @@
 
     performAnyPendingRepaintsNow
         d2dPaintSync()
+
 
 */
 
@@ -458,8 +456,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     bool resized()
     {
-        ScopedLock locker{ lock };
-
         //
         // Get the width & height from the client area; make sure width and height are between 1 and 16384
         //
@@ -504,8 +500,48 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return false;
     }
 
-    void startRender()
+    void addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
     {
+        auto* const presentation = presentations + presentationIndex;
+        presentation->paintAreas.add(deferredRepaint);
+    }
+
+    bool needsRepaint() const
+    {
+        auto* const presentation = presentations + presentationIndex;
+        return presentation->paintAreas.getNumRectangles() > 0;
+    }
+
+    bool startRender(juce::Rectangle<int>& initialClipBounds)
+    {
+        //
+        // Ready to paint? Return if the previous presentation has not been presented
+        //
+        if (presentations[presentationIndex ^ 1].state != Presentation::clear)
+        {
+            return false;
+        }
+
+        auto* const presentation = presentations + presentationIndex;
+
+        //
+        // Any areas to update?
+        //
+        updateRegion.refresh(hwnd);
+        if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
+        {
+            return false;
+        }
+        updateRegion.addToRectangleList(presentation->paintAreas);
+        ValidateRgn(hwnd, updateRegion.regionHandle);
+
+        initialClipBounds = presentation->paintAreas.getBounds();
+
+        //
+        // Start painting
+        //
+        presentation->state = Presentation::painting;
+
 #if 0 // JUCE_DEBUG
         for (auto const deferredRepaint : deferredRepaints)
         {
@@ -528,6 +564,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 deviceContext->BeginDraw();
             }
         }
+
+        return true;
     }
 
     void finishRender()
@@ -536,31 +574,33 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         {
             auto hr = deviceContext->EndDraw();
             deviceContext->SetTarget(nullptr);
-
-            auto deferredRepaintsBounds = deferredRepaints.getBounds();
-            if (!bufferBounds.intersects(deferredRepaintsBounds) || deferredRepaintsBounds.isEmpty())
+            if (FAILED(hr))
             {
                 return;
             }
 
-            if (SUCCEEDED(hr))
+            auto* const presentation = presentations + presentationIndex;
+            auto paintBounds = presentation->paintAreas.getBounds();
+            if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
             {
-                {
-                    //ScopedLock locker{ lock };
-
-                    dirtyRectangles.ensureStorageAllocated(deferredRepaints.getNumRectangles());
-                    dirtyRectangles.clearQuick();
-
-                    for (auto const& deferredRepaint : deferredRepaints)
-                    {
-                        dirtyRectangles.add(direct2d::rectangleToRECT(deferredRepaint));
-                    }
-                }
-
-                presentationReady.set(true);
-                notify();
-                ValidateRect(hwnd, nullptr); // xxx ??? ValidateRgn? earlier?
+                return;
             }
+
+            presentation->state = Presentation::painted;
+
+            {
+                dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
+                dirtyRectangles.clearQuick();
+
+                for (auto const& paintArea : presentation->paintAreas)
+                {
+                    dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
+                }
+            }
+
+            paintedPresentation.store(presentation);
+            presentationIndex ^= 1;
+            notify();
 
             if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
             {
@@ -634,64 +674,70 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
         while (!threadShouldExit())
         {
+            HRESULT hr = 0; 
+            
             wait(-1);
 
-            if (presentationReady.get() == false)
+            auto presentation = paintedPresentation.exchange(nullptr);
+            if (presentation == nullptr)
             {
                 continue;
             }
 
-            HRESULT hr = 0;
-
+            jassert(presentation->state == Presentation::painted);
+            
+            if (fullPresentDone)
             {
-                juce::ScopedTryLock locker{ lock };
-
-                if (locker.isLocked() && swapChain)
+                DXGI_PRESENT_PARAMETERS presentParameters
                 {
-                    if (fullPresentDone)
-                    {
-                        DXGI_PRESENT_PARAMETERS presentParameters
-                        {
-                            (uint32)dirtyRectangles.size(),
-                            dirtyRectangles.getRawDataPointer(),
-                            nullptr,
-                            nullptr
-                        };
+                    (uint32)dirtyRectangles.size(),
+                    dirtyRectangles.getRawDataPointer(),
+                    nullptr,
+                    nullptr
+                };
 
-                        hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
-                        jassert(SUCCEEDED(hr));
-                    }
-                    else
-                    {
-                        hr = swapChain->Present(presentSyncInterval, presentFlags);
-                        fullPresentDone = true;
-                    }
-
-                    owner.stats.presentCount++;
-                }
-
-                presentationReady = false;
+                hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                jassert(SUCCEEDED(hr));
+            }
+            else
+            {
+                hr = swapChain->Present(presentSyncInterval, presentFlags);
+                fullPresentDone = true;
             }
 
+            owner.stats.presentCount++;
             if (SUCCEEDED(hr))
             {
                 struct PaintReadyMessage : public CallbackMessage
                 {
-                    PaintReadyMessage(Pimpl* that_) : that(that_) {}
+                    PaintReadyMessage(Pimpl* that_, Presentation* presentation_) : 
+                        that(that_),
+                        presentation(presentation_) 
+                    {
+                    }
                     ~PaintReadyMessage() override = default;
 
                     void messageCallback() override
                     {
-                        if (that && that->owner.onPaintReady)
+                        if (that)
                         {
-                            that->owner.onPaintReady();
+                            if (presentation)
+                            {
+                                presentation->reset();
+                            }
+
+                            if (that->owner.onPaintReady)
+                            {
+                                that->owner.onPaintReady();
+                            }
                         }
                     }
 
                     WeakReference<Pimpl> that;
+                    Presentation* presentation;
                 };
 
-                (new PaintReadyMessage{ this })->post();
+                (new PaintReadyMessage{ this, presentation })->post();
                 continue;
             }
 
@@ -702,6 +748,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                     {
                         releaseDeviceContext();
                     });
+                return; // xxx restart thread?
             }
         }
     }
@@ -725,11 +772,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
     ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
 
     direct2d::UpdateRegion updateRegion;
-    juce::RectangleList<int> deferredRepaints;
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
-    CriticalSection lock;
     DXGI_SWAP_EFFECT const swapEffect;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
@@ -741,17 +786,34 @@ private:
     ComSmartPtr<ID2D1DeviceContext> deviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
-    Atomic<bool> presentationReady = false;
     Array<RECT> dirtyRectangles;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
     ComSmartPtr<IDCompositionDevice> compositionDevice;
     ComSmartPtr<IDCompositionTarget> compositionTarget;
     ComSmartPtr<IDCompositionVisual> compositionVisual;
 
+    struct Presentation
+    {
+        enum State
+        {
+            clear,
+            painting,
+            painted
+        } state = clear;
+        juce::RectangleList<int> paintAreas;
+        //ComSmartPtr<ID2D1CommandList> commandList;
+
+        void reset()
+        {
+            state = clear;
+            paintAreas.clear();
+        }
+    } presentations[2];
+    int presentationIndex = 0;
+    std::atomic<Presentation*> paintedPresentation = nullptr;
+
     void createDeviceContext()
     {
-        ScopedLock locker{ lock };
-
         if (d2dDedicatedFactory != nullptr)
         {
             if (deviceContext == nullptr)
@@ -858,18 +920,18 @@ private:
 
     void releaseDeviceContext()
     {
-        ScopedLock locker{ lock };
-
         colourBrush = nullptr;
         swapChainBuffer = nullptr;
         swapChain = nullptr;
         deviceContext = nullptr;
+        for (auto& presentation : presentations)
+        {
+            presentation.reset();
+        }
     }
 
     void createSwapChainBuffer()
     {
-        ScopedLock locker{ lock };
-
         if (deviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
         {
             ComSmartPtr<IDXGISurface> surface;
@@ -1224,51 +1286,58 @@ bool Direct2DLowLevelGraphicsContext::resized()
 void Direct2DLowLevelGraphicsContext::addDeferredRepaint(juce::Rectangle<int> deferredRepaint)
 {
     //DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
-    pimpl->deferredRepaints.add(deferredRepaint);
+    pimpl->addDeferredRepaint(deferredRepaint);
 
     triggerAsyncUpdate();
 }
 
 bool Direct2DLowLevelGraphicsContext::needsRepaint()
 {
-    pimpl->updateRegion.refresh(pimpl->hwnd);
-
-    return pimpl->updateRegion.getNumRECT() > 0 || pimpl->deferredRepaints.getNumRectangles() > 0;
+    return pimpl->needsRepaint();
 }
 
 bool Direct2DLowLevelGraphicsContext::startPartialPaint()
 {
-    pimpl->updateRegion.refresh(pimpl->hwnd);
+    juce::Rectangle<int> initialClipBounds;
+    if (pimpl->startRender(initialClipBounds))
+    {
+        saveState();
 
-    if (pimpl->updateRegion.getNumRECT() == 0 && pimpl->deferredRepaints.getNumRectangles() == 0)
+        if (initialClipBounds.isEmpty() == false)
+        {
+            //DBG("   deferredRepaintsBounds " << deferredRepaintsBounds.toString());
+            clipToRectangle(initialClipBounds);
+            //DBG("      clipRegion " << currentState->clipRegion.toString());
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::startFullPaint()
+{
+    jassertfalse;
+
+    //
+    // Ready to paint?
+    //
+#if 0 // xxx fix this or remove it!
+    if (pimpl->isIdle() == false)
     {
         return false;
     }
 
-    pimpl->updateRegion.addToRectangleList(pimpl->deferredRepaints);
-
-    pimpl->startRender();
-
-    saveState();
-
-    if (auto deferredRepaintsBounds = pimpl->deferredRepaints.getBounds(); deferredRepaintsBounds.isEmpty() == false)
-    {
-        //DBG("   deferredRepaintsBounds " << deferredRepaintsBounds.toString());
-        clipToRectangle(deferredRepaintsBounds);
-        //DBG("      clipRegion " << currentState->clipRegion.toString());
-    }
-
-    return true;
-}
-
-void Direct2DLowLevelGraphicsContext::startFullPaint()
-{
     pimpl->updateRegion.clear();
     pimpl->deferredRepaints.clear();
 
     pimpl->startRender();
 
     saveState();
+#endif
+
+    return true;
 }
 
 void Direct2DLowLevelGraphicsContext::end()
@@ -1282,7 +1351,6 @@ void Direct2DLowLevelGraphicsContext::end()
     pimpl->finishRender();
 
     pimpl->updateRegion.clear();
-    pimpl->deferredRepaints.clear();
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
