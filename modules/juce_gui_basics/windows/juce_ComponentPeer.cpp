@@ -611,4 +611,5 @@ void ComponentPeer::globalFocusChanged ([[maybe_unused]] Component* comp)
     refreshTextInputTarget();
 }
 
+
 } // namespace juce

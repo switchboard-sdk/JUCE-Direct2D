@@ -544,6 +544,7 @@ public:
 
 #if JUCE_DIRECT2D
     PaintStats stats;
+    FrameHistory frameHistory;
 #endif
 
 protected:

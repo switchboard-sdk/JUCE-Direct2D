@@ -2429,6 +2429,7 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
+    int frameNumber = 0;
    #endif
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
@@ -2858,6 +2859,7 @@ private:
     {
 #if JUCE_DIRECT2D
         auto startPaintTicks = juce::Time::getHighResolutionTicks();
+        FrameTime frameTime;
 
         if (direct2DContext != nullptr)
         {
@@ -2906,6 +2908,12 @@ private:
             stats.accumulators[PaintStats::paintInterval].addValue(Time::highResolutionTicksToSeconds(startPaintTicks - stats.lastPaintStartTicks));
         }
         stats.lastPaintStartTicks = startPaintTicks;
+
+        frameTime.frameNumber = frameNumber;
+        frameTime.paintStartTicks = startPaintTicks;
+        frameTime.paintFinishTicks = finishPaintTicks;
+        frameHistory.push(frameTime);
+        ++frameNumber;
 #endif
     }
 
@@ -2918,7 +2926,7 @@ private:
         //
         // Start partial paint returns true if there are any areas to be painted
         //
-        if (direct2DContext->startPartialPaint())
+        if (direct2DContext->startPartialPaint(frameNumber))
         {
             handlePaint(*direct2DContext);
             direct2DContext->end();
@@ -3062,7 +3070,7 @@ private:
         }
         else if (direct2DContext == nullptr)
         {
-            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, stats);
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, stats, frameHistory);
             direct2DContext->setScaleFactor(getPlatformScaleFactor());
 
             exStyle |= WS_EX_NOREDIRECTIONBITMAP;
@@ -3859,6 +3867,7 @@ private:
         {
             if (direct2DContext->resized())
             {
+                //xxx fix me
                 //handleDirect2DPaint();
             }
         }

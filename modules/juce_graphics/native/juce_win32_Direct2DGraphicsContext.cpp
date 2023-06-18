@@ -334,10 +334,11 @@ namespace juce
 
 struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 {
-    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
+    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, FrameHistory& frameHistory_) :
         Thread("Direct2DLowLevelGraphicsContext"),
         owner(owner_),
         hwnd(hwnd_),
+        frameHistory(frameHistory_),
         swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
         bufferCount(2),
         dxgiScaling(DXGI_SCALING_STRETCH),
@@ -512,7 +513,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return presentation->paintAreas.getNumRectangles() > 0;
     }
 
-    bool startRender(juce::Rectangle<int>& initialClipBounds)
+    bool startRender(int frameNumber, juce::Rectangle<int>& initialClipBounds)
     {
         //
         // Ready to paint? Return if the previous presentation has not been presented
@@ -540,6 +541,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         //
         // Start painting
         //
+        presentation->frameNumber = frameNumber;
         presentation->state = Presentation::painting;
 
 #if 0 // JUCE_DEBUG
@@ -684,6 +686,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 continue;
             }
 
+            presentation->presentStartTicks = Time::getHighResolutionTicks();
+
             jassert(presentation->state == Presentation::painted);
             
             if (fullPresentDone)
@@ -705,6 +709,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 fullPresentDone = true;
             }
 
+            presentation->presentFinishTicks = Time::getHighResolutionTicks();
+
             owner.stats.presentCount++;
             if (SUCCEEDED(hr))
             {
@@ -721,6 +727,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                     {
                         if (that)
                         {
+                            that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
+                                
                             if (presentation)
                             {
                                 presentation->reset();
@@ -775,6 +783,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
+    FrameHistory& frameHistory;
     DXGI_SWAP_EFFECT const swapEffect;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
@@ -794,6 +803,8 @@ private:
 
     struct Presentation
     {
+        int frameNumber = -1;
+
         enum State
         {
             clear,
@@ -808,6 +819,9 @@ private:
             state = clear;
             paintAreas.clear();
         }
+
+        int64_t presentStartTicks = 0;
+        int64_t presentFinishTicks = 0;
     } presentations[2];
     int presentationIndex = 0;
     std::atomic<Presentation*> paintedPresentation = nullptr;
@@ -1265,9 +1279,9 @@ public:
 };
 
 //==============================================================================
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_, FrameHistory& frameHistory_)
     : currentState (nullptr),
-      pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported())),
+      pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), frameHistory_)),
       stats(stats_)
 {
     resized();
@@ -1296,10 +1310,10 @@ bool Direct2DLowLevelGraphicsContext::needsRepaint()
     return pimpl->needsRepaint();
 }
 
-bool Direct2DLowLevelGraphicsContext::startPartialPaint()
+bool Direct2DLowLevelGraphicsContext::startPartialPaint(int frameNumber)
 {
     juce::Rectangle<int> initialClipBounds;
-    if (pimpl->startRender(initialClipBounds))
+    if (pimpl->startRender(frameNumber, initialClipBounds))
     {
         saveState();
 

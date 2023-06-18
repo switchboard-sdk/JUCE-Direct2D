@@ -60,10 +60,55 @@ struct PaintStats
     }
 };
 
+struct FrameTime
+{
+    int frameNumber = 0;
+    int64_t paintStartTicks = 0;
+    int64_t paintFinishTicks = 0;
+    int64_t presentStartTicks = 0;
+    int64_t presentFinishTicks = 0;
+};
+
+class FrameHistory
+{
+public:
+    int const frameHistoryLength = 2048;
+    std::deque<FrameTime> const& getQueue() const
+    {
+        return frameTimes;
+    }
+
+    void push(FrameTime& frameTime)
+    {
+        frameTimes.push_back(frameTime);
+        while (frameTimes.size() > frameHistoryLength)
+        {
+            frameTimes.pop_front();
+        }
+    }
+
+    void storePresentTime(int frameNumber, int64_t presentStartTicks, int64_t presentFinishTicks)
+    {
+        for (juce::pointer_sized_int index = frameTimes.size() - 1; index >= 0; --index)
+        {
+            auto& frame = frameTimes[index];
+            if (frame.frameNumber == frameNumber)
+            {
+                frame.presentStartTicks = presentStartTicks;
+                frame.presentFinishTicks = presentFinishTicks;
+                break;
+            }
+        }
+    }
+
+private:
+    std::deque<FrameTime> frameTimes;
+};
+
 class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public juce::AsyncUpdater
 {
 public:
-    Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_);
+    Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_, FrameHistory& frameHistory_);
     ~Direct2DLowLevelGraphicsContext();
 
     //==============================================================================
@@ -114,7 +159,7 @@ public:
 
     void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
     bool needsRepaint();
-    bool startPartialPaint();
+    bool startPartialPaint(int frameNumber);
     bool startFullPaint();
     void end();
 
