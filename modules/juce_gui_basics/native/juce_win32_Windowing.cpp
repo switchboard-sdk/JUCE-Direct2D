@@ -1816,8 +1816,8 @@ public:
         #if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
-            direct2DContext->resized();
-            //handleDirect2DPaint();
+            InvalidateRect(hwnd, nullptr, FALSE);
+            handleDirect2DPaint();
         }
         #endif
     }
@@ -2185,7 +2185,7 @@ public:
 #if JUCE_DIRECT2D
             if (direct2DContext)
             {
-                //handleDirect2DPaint();
+                handleDirect2DPaint();
             }
             else
 #endif
@@ -3867,8 +3867,11 @@ private:
         {
             if (direct2DContext->resized())
             {
-                //xxx fix me
-                //handleDirect2DPaint();
+                //
+                // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
+                //
+                InvalidateRect(hwnd, nullptr, FALSE);
+                handleDirect2DPaint();
             }
         }
 #endif

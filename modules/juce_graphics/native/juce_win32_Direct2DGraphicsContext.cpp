@@ -513,12 +513,17 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return presentation->paintAreas.getNumRectangles() > 0;
     }
 
+    bool isReadyToPaint() const
+    {
+        return presentations[presentationIndex ^ 1].state == Presentation::clear;
+    }
+
     bool startRender(int frameNumber, juce::Rectangle<int>& initialClipBounds)
     {
         //
         // Ready to paint? Return if the previous presentation has not been presented
         //
-        if (presentations[presentationIndex ^ 1].state != Presentation::clear)
+        if (!isReadyToPaint())
         {
             return false;
         }
@@ -538,6 +543,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
         initialClipBounds = presentation->paintAreas.getBounds();
 
+        presentation->presentEntireWindow = initialClipBounds.contains(bufferBounds);
+
         //
         // Start painting
         //
@@ -545,9 +552,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         presentation->state = Presentation::painting;
 
 #if 0 // JUCE_DEBUG
-        for (auto const deferredRepaint : deferredRepaints)
+        for (auto const area : presentation->paintAreas)
         {
-            DBG("   deferred " << deferredRepaint.toString());
+            DBG("   area " << area.toString());
         }
 
         for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
@@ -591,12 +598,12 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             presentation->state = Presentation::painted;
 
             {
-                dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
-                dirtyRectangles.clearQuick();
+                presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
+                presentation->dirtyRectangles.clearQuick();
 
                 for (auto const& paintArea : presentation->paintAreas)
                 {
-                    dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
+                    presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
                 }
             }
 
@@ -676,43 +683,53 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
         while (!threadShouldExit())
         {
-            HRESULT hr = 0; 
-            
+            //
+            // Wait until a presentation is ready
+            //
             wait(-1);
 
+            //
+            // Is a presentation ready?
+            //
             auto presentation = paintedPresentation.exchange(nullptr);
             if (presentation == nullptr)
             {
                 continue;
             }
 
-            presentation->presentStartTicks = Time::getHighResolutionTicks();
-
             jassert(presentation->state == Presentation::painted);
             
-            if (fullPresentDone)
+            //
+            // If this swap chain buffer has never been painted, present the entire window
+            // 
+            // Otherwise, present the update region
+            //
             {
-                DXGI_PRESENT_PARAMETERS presentParameters
+                DXGI_PRESENT_PARAMETERS presentParameters{};
+#if JUCE_DIRECT2D_METRICS
+                presentation->presentStartTicks = Time::getHighResolutionTicks();
+#endif
+
+                if (fullPresentDone && !presentation->presentEntireWindow)
                 {
-                    (uint32)dirtyRectangles.size(),
-                    dirtyRectangles.getRawDataPointer(),
-                    nullptr,
-                    nullptr
-                };
+                    presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
+                    presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
+                }
 
-                hr = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
-                jassert(SUCCEEDED(hr));
+                presentation->status = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                jassert(SUCCEEDED(presentation->status));
+
+                fullPresentDone = SUCCEEDED(presentation->status);
+
+#if JUCE_DIRECT2D_METRICS
+                presentation->presentFinishTicks = Time::getHighResolutionTicks();
+                owner.stats.presentCount++;
+#endif
             }
-            else
-            {
-                hr = swapChain->Present(presentSyncInterval, presentFlags);
-                fullPresentDone = true;
-            }
 
-            presentation->presentFinishTicks = Time::getHighResolutionTicks();
-
-            owner.stats.presentCount++;
-            if (SUCCEEDED(hr))
+            //
+            // Post a message indicating that this presentation is done; ready for the next one
+            //
             {
                 struct PresentDoneMessage : public CallbackMessage
                 {
@@ -725,12 +742,26 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
                     void messageCallback() override
                     {
+                        //
+                        // Back on the message thread
+                        //
                         if (that)
                         {
+#if JUCE_DIRECT2D_METRICS
                             that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
+#endif
                                 
                             if (presentation)
                             {
+                                //
+                                // Release the device context if Present1 returned an error
+                                //
+                                auto status = presentation->status;
+                                if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
+                                {
+                                    that->releaseDeviceContext();
+                                }
+
                                 presentation->reset();
                             }
 
@@ -746,17 +777,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 };
 
                 (new PresentDoneMessage{ this, presentation })->post();
-                continue;
-            }
-
-            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
-            {
-                fullPresentDone = false;
-                MessageManager::callAsync([this]()
-                    {
-                        releaseDeviceContext();
-                    });
-                return; // xxx restart thread?
             }
         }
     }
@@ -804,7 +824,10 @@ private:
     struct Presentation
     {
         int frameNumber = -1;
-
+        HRESULT status = S_OK;
+        bool presentEntireWindow = true;
+        juce::RectangleList<int> paintAreas;
+        Array<RECT> dirtyRectangles;
         enum State
         {
             clear,
@@ -818,6 +841,7 @@ private:
         {
             state = clear;
             paintAreas.clear();
+            dirtyRectangles.clearQuick();
         }
 
         int64_t presentStartTicks = 0;
@@ -1310,7 +1334,7 @@ bool Direct2DLowLevelGraphicsContext::needsRepaint()
     return pimpl->needsRepaint();
 }
 
-bool Direct2DLowLevelGraphicsContext::startPartialPaint(int frameNumber)
+bool Direct2DLowLevelGraphicsContext::startPartialAsynchronousPaint(int frameNumber)
 {
     juce::Rectangle<int> initialClipBounds;
     if (pimpl->startRender(frameNumber, initialClipBounds))
@@ -1328,30 +1352,6 @@ bool Direct2DLowLevelGraphicsContext::startPartialPaint(int frameNumber)
     }
 
     return false;
-}
-
-bool Direct2DLowLevelGraphicsContext::startFullPaint()
-{
-    jassertfalse;
-
-    //
-    // Ready to paint?
-    //
-#if 0 // xxx fix this or remove it!
-    if (pimpl->isIdle() == false)
-    {
-        return false;
-    }
-
-    pimpl->updateRegion.clear();
-    pimpl->deferredRepaints.clear();
-
-    pimpl->startRender();
-
-    saveState();
-#endif
-
-    return true;
 }
 
 void Direct2DLowLevelGraphicsContext::end()
