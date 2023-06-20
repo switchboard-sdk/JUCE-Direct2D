@@ -1013,7 +1013,7 @@ public:
 
     void clearFont()
     {
-        currentFontFace = localFontFace = nullptr;
+        currentFontFace = nullptr;
     }
 
     void setFont (const Font& newFont)
@@ -1202,7 +1202,6 @@ public:
     float fontHeightToEmSizeFactor = 1.0f;
 
     IDWriteFontFace* currentFontFace = nullptr;
-    ComSmartPtr<IDWriteFontFace> localFontFace;
 
     OwnedArray<Layer> pushedLayers;
 

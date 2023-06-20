@@ -40,6 +40,8 @@ struct PaintStats
         paintDuration,
         paintInterval,
         threadPaintDuration,
+        restoreState,
+        end,
         present,
         numStats
     };
