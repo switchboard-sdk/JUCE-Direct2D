@@ -39,6 +39,7 @@ struct PaintStats
     {
         paintDuration,
         paintInterval,
+        threadPaintDuration,
         present,
         numStats
     };

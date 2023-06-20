@@ -595,12 +595,14 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 continue;
             }
 
+            presentation->threadBeginDrawTicks = Time::getHighResolutionTicks();
+
             deviceContext->SetTarget(swapChainBuffer);
             deviceContext->BeginDraw();
             deviceContext->DrawImage(presentation->commandList);
             presentation->status = deviceContext->EndDraw();
             deviceContext->SetTarget(nullptr);
-            
+
             //
             // If this swap chain buffer has never been painted, present the entire window
             // 
@@ -696,6 +698,8 @@ private:
 
         int frameNumber = -1;
 #if JUCE_DIRECT2D_METRICS
+        int64_t threadBeginDrawTicks = 0;
+        int64_t threadEndDrawTicks = 0;
         int64_t presentStartTicks = 0;
         int64_t presentFinishTicks = 0;
 #endif
@@ -730,6 +734,8 @@ private:
             {
 #if JUCE_DIRECT2D_METRICS
                 that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
+                that->owner.stats.accumulators[PaintStats::threadPaintDuration].addValue(Time::highResolutionTicksToSeconds(presentation->presentStartTicks - presentation->threadBeginDrawTicks));
+                that->owner.stats.accumulators[PaintStats::present].addValue(Time::highResolutionTicksToSeconds(presentation->presentFinishTicks - presentation->presentStartTicks));
 #endif
 
                 if (presentation)
