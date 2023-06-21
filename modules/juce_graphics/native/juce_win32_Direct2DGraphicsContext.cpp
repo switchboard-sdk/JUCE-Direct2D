@@ -595,7 +595,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 continue;
             }
 
+#if JUCE_DIRECT2D_METRICS
             presentation->threadBeginDrawTicks = Time::getHighResolutionTicks();
+#endif
 
             threadDeviceContext->SetTarget(swapChainBuffer);
             threadDeviceContext->BeginDraw();
