@@ -371,7 +371,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     ID2D1DeviceContext* const getDeviceContext() const 
     {
-        return deviceContext;
+        return commandListDeviceContext;
     }
 
     ID2D1SolidColorBrush* const getColourBrush() const
@@ -405,9 +405,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         //
         // Resize the swap chain 
         //
-        if (deviceContext != nullptr)
+        if (threadDeviceContext != nullptr)
         {
-            deviceContext->SetTarget(nullptr); // xxx this may be redundant
+            threadDeviceContext->SetTarget(nullptr); // xxx this may be redundant
         }
 
         if (swapChain != nullptr)
@@ -501,14 +501,14 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 #endif
 
         createDeviceContext();
-        if (deviceContext != nullptr)
+        if (commandListDeviceContext != nullptr)
         {
             createSwapChainBuffer();
             if (swapChainBuffer != nullptr)
             {
-                deviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
-                deviceContext->SetTarget(presentation->commandList);
-                deviceContext->BeginDraw();
+                commandListDeviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
+                commandListDeviceContext->SetTarget(presentation->commandList);
+                commandListDeviceContext->BeginDraw();
             }
         }
 
@@ -517,12 +517,12 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     void finishRender()
     {
-        if (deviceContext != nullptr && swapChain != nullptr)
+        if (commandListDeviceContext != nullptr && swapChain != nullptr)
         {
             auto* const presentation = presentations + presentationIndex;
 
-            auto hr = deviceContext->EndDraw();
-            deviceContext->SetTarget(nullptr);
+            auto hr = commandListDeviceContext->EndDraw();
+            commandListDeviceContext->SetTarget(nullptr);
             presentation->commandList->Close();
             if (FAILED(hr))
             {
@@ -585,7 +585,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             //
             // Render the command list
             //
-            if (deviceContext == nullptr ||
+            if (threadDeviceContext == nullptr ||
                 swapChain == nullptr ||
                 swapChainBuffer == nullptr ||
                 presentation->commandList == nullptr)
@@ -597,11 +597,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
             presentation->threadBeginDrawTicks = Time::getHighResolutionTicks();
 
-            deviceContext->SetTarget(swapChainBuffer);
-            deviceContext->BeginDraw();
-            deviceContext->DrawImage(presentation->commandList);
-            presentation->status = deviceContext->EndDraw();
-            deviceContext->SetTarget(nullptr);
+            threadDeviceContext->SetTarget(swapChainBuffer);
+            threadDeviceContext->BeginDraw();
+            threadDeviceContext->DrawImage(presentation->commandList);
+            presentation->status = threadDeviceContext->EndDraw();
+            threadDeviceContext->SetTarget(nullptr);
 
             //
             // If this swap chain buffer has never been painted, present the entire window
@@ -671,7 +671,8 @@ private:
     uint32 const swapChainFlags;
     uint32 const presentSyncInterval;
     uint32 const presentFlags;
-    ComSmartPtr<ID2D1DeviceContext> deviceContext;
+    ComSmartPtr<ID2D1DeviceContext> commandListDeviceContext;
+    ComSmartPtr<ID2D1DeviceContext> threadDeviceContext;
     ComSmartPtr<IDXGISwapChain1> swapChain;
     ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
@@ -699,7 +700,6 @@ private:
         int frameNumber = -1;
 #if JUCE_DIRECT2D_METRICS
         int64_t threadBeginDrawTicks = 0;
-        int64_t threadEndDrawTicks = 0;
         int64_t presentStartTicks = 0;
         int64_t presentFinishTicks = 0;
 #endif
@@ -733,7 +733,10 @@ private:
             if (that)
             {
 #if JUCE_DIRECT2D_METRICS
-                that->frameHistory.storePresentTime(presentation->frameNumber, presentation->presentStartTicks, presentation->presentFinishTicks);
+                that->frameHistory.storePresentTime(presentation->frameNumber, 
+                    presentation->presentStartTicks, 
+                    presentation->presentFinishTicks,
+                    presentation->threadBeginDrawTicks);
                 that->owner.stats.accumulators[PaintStats::threadPaintDuration].addValue(Time::highResolutionTicksToSeconds(presentation->presentStartTicks - presentation->threadBeginDrawTicks));
                 that->owner.stats.accumulators[PaintStats::present].addValue(Time::highResolutionTicksToSeconds(presentation->presentFinishTicks - presentation->presentStartTicks));
 #endif
@@ -772,7 +775,7 @@ private:
     {
         if (d2dDedicatedFactory != nullptr)
         {
-            if (deviceContext == nullptr)
+            if (commandListDeviceContext == nullptr || threadDeviceContext == nullptr)
             {
                 // This flag adds support for surfaces with a different color channel ordering
                 // than the API default. It is required for compatibility with Direct2D.
@@ -827,11 +830,15 @@ private:
                                     hr = d2dDedicatedFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
                                     if (SUCCEEDED(hr))
                                     {
-                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS, deviceContext.resetAndGetPointerAddress());
+                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, threadDeviceContext.resetAndGetPointerAddress());
                                         if (SUCCEEDED(hr))
                                         {
+                                            threadDeviceContext->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+
                                             updateDeviceContextDPI();
                                         }
+
+                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, commandListDeviceContext.resetAndGetPointerAddress());
                                     }
                                 }
 
@@ -866,9 +873,9 @@ private:
                 jassert(SUCCEEDED(hr));
             }
 
-            if (colourBrush == nullptr && deviceContext != nullptr)
+            if (colourBrush == nullptr && commandListDeviceContext != nullptr)
             {
-                auto hr = deviceContext->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
+                auto hr = commandListDeviceContext->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
                 jassertquiet(SUCCEEDED(hr));
             }
         }
@@ -879,7 +886,8 @@ private:
         colourBrush = nullptr;
         swapChainBuffer = nullptr;
         swapChain = nullptr;
-        deviceContext = nullptr;
+        commandListDeviceContext = nullptr;
+        threadDeviceContext = nullptr;
         for (auto& presentation : presentations)
         {
             presentation.reset();
@@ -888,7 +896,7 @@ private:
 
     void createSwapChainBuffer()
     {
-        if (deviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
+        if (threadDeviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
         {
             ComSmartPtr<IDXGISurface> surface;
             auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
@@ -898,7 +906,7 @@ private:
                 bitmapProperties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
                 bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
                 bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-                hr = deviceContext->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
+                hr = threadDeviceContext->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
                 jassert(SUCCEEDED(hr));
             }
         }
@@ -906,11 +914,11 @@ private:
 
     void updateDeviceContextDPI()
     {
-        if (deviceContext)
+        if (threadDeviceContext)
         {
             float windowsDefaultDPI = 96.0f;
             float scaledDPI = windowsDefaultDPI * (float)dpiScalingFactor;
-            deviceContext->SetDpi(scaledDPI, scaledDPI);
+            threadDeviceContext->SetDpi(scaledDPI, scaledDPI);
         }
     }
 

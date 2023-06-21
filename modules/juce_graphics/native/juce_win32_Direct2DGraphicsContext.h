@@ -70,6 +70,8 @@ struct FrameTime
     int frameNumber = 0;
     int64_t paintStartTicks = 0;
     int64_t paintFinishTicks = 0;
+    int64_t threadPaintStartTicks = 0;
+    int64_t threadPaintFinishTicks = 0;
     int64_t presentStartTicks = 0;
     int64_t presentFinishTicks = 0;
 };
@@ -92,7 +94,7 @@ public:
         }
     }
 
-    void storePresentTime(int frameNumber, int64_t presentStartTicks, int64_t presentFinishTicks)
+    void storePresentTime(int frameNumber, int64_t presentStartTicks, int64_t presentFinishTicks, int64_t threadPaintStart)
     {
         for (juce::pointer_sized_int index = frameTimes.size() - 1; index >= 0; --index)
         {
@@ -101,6 +103,7 @@ public:
             {
                 frame.presentStartTicks = presentStartTicks;
                 frame.presentFinishTicks = presentFinishTicks;
+                frame.threadPaintStartTicks = threadPaintStart;
                 break;
             }
         }
