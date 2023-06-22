@@ -1819,7 +1819,7 @@ public:
         if (direct2DContext != nullptr)
         {
             InvalidateRect(hwnd, nullptr, FALSE);
-            handleDirect2DPaint();
+            handleDirect2DPaintAsync();
         }
         #endif
     }
@@ -2187,7 +2187,7 @@ public:
 #if JUCE_DIRECT2D
             if (direct2DContext)
             {
-                handleDirect2DPaint();
+                handleDirect2DPaintAsync();
             }
             else
 #endif
@@ -2867,7 +2867,7 @@ private:
 
         if (direct2DContext != nullptr)
         {
-            handleDirect2DPaint();
+            handleDirect2DPaintAsync();
         }
         else
 #endif
@@ -2923,17 +2923,26 @@ private:
 
 
 #if JUCE_DIRECT2D
-    void handleDirect2DPaint()
+    void handleDirect2DPaintSync()
+    {
+        jassert(direct2DContext);
+
+        direct2DContext->startSync();
+        handlePaint(*direct2DContext);
+        direct2DContext->endSync();
+    }
+
+    void handleDirect2DPaintAsync()
     {
         jassert(direct2DContext);
 
         //
-        // startPartialAsynchronousPaint returns true if there are any areas to be painted
+        // startAsync returns true if there are any areas to be painted
         //
-        if (direct2DContext->startPartialAsynchronousPaint(frameNumber))
+        if (direct2DContext->startAsync(frameNumber))
         {
             handlePaint(*direct2DContext);
-            direct2DContext->end();
+            direct2DContext->endAsync();
         }
     }
 #endif
@@ -3087,7 +3096,7 @@ private:
             { 
                 if (direct2DContext->needsRepaint())
                 {
-                    handlePaintMessage();
+                    handleDirect2DPaintAsync();
                 }
             };
         }
@@ -3873,14 +3882,14 @@ private:
 #if JUCE_DIRECT2D
         if (direct2DContext)
         {
-            if (direct2DContext->resized())
-            {
-                //
-                // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
-                //
-                InvalidateRect(hwnd, nullptr, FALSE);
-                handleDirect2DPaint();
-            }
+            ScopedLock locker{ direct2DContext->resizeLock };
+
+            direct2DContext->resized();
+            //
+            // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
+            //
+            InvalidateRect(hwnd, nullptr, FALSE);
+            handleDirect2DPaintSync();
         }
 #endif
 
