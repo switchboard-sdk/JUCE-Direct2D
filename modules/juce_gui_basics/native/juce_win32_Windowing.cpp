@@ -1816,10 +1816,16 @@ public:
                                             roundToInt ((info.rcWindow.right  - info.rcClient.right)  / scaleFactor));
 
         #if JUCE_DIRECT2D
-        if (direct2DContext != nullptr)
+        if (direct2DContext)
         {
+            ScopedLock locker{ direct2DContext->resizeLock };
+
+            direct2DContext->resized();
+            //
+            // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
+            //
             InvalidateRect(hwnd, nullptr, FALSE);
-            handleDirect2DPaintAsync();
+            handleDirect2DPaintSync();
         }
         #endif
     }
