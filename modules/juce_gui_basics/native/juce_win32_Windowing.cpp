@@ -3875,10 +3875,6 @@ private:
         {
             if (direct2DContext->resized())
             {
-                //
-                // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
-                //
-                InvalidateRect(hwnd, nullptr, FALSE);
                 handleDirect2DPaint();
             }
         }

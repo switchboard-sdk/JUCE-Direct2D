@@ -402,6 +402,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
         bufferBounds = windowRect;
 
+        if (!isReadyToPaint())
+        {
+            return false;
+        }
+
         //
         // Resize the swap chain 
         //
@@ -417,6 +422,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             auto scaledWidth = roundToInt(bufferBounds.getWidth() * dpiScalingFactor);
             auto scaledHeight = roundToInt(bufferBounds.getHeight() * dpiScalingFactor);
             auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
+            InvalidateRect(hwnd, nullptr, FALSE); // Require entire window to redraw since the backbuffer is reallocating
 
             if (SUCCEEDED(hr))
             {
@@ -616,7 +622,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 presentation->presentStartTicks = Time::getHighResolutionTicks();
 #endif
 
-                if (0)//if (fullPresentDone && !presentation->presentEntireWindow)
+                if (fullPresentDone && !presentation->presentEntireWindow)
                 {
                     presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
                     presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
@@ -670,6 +676,7 @@ private:
     DXGI_SCALING const dxgiScaling;
     double dpiScalingFactor = 1.0;
     juce::Rectangle<int> bufferBounds{ 1, 1 };
+    bool resizePending = false;
     uint32 const swapChainFlags;
     uint32 const presentSyncInterval;
     uint32 const presentFlags;
@@ -755,6 +762,12 @@ private:
                     }
 
                     presentation->reset();
+                }
+
+                if (that->resizePending)
+                {
+                    that->resized();
+                    that->resizePending = false;
                 }
 
                 if (that->owner.onPaintReady)
