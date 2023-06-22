@@ -96,7 +96,7 @@ public:
 
     void storePresentTime(int frameNumber, int64_t presentStartTicks, int64_t presentFinishTicks, int64_t threadPaintStart)
     {
-        for (juce::pointer_sized_int index = frameTimes.size() - 1; index >= 0; --index)
+        for (pointer_sized_int index = frameTimes.size() - 1; index >= 0; --index)
         {
             auto& frame = frameTimes[index];
             if (frame.frameNumber == frameNumber)
@@ -115,7 +115,7 @@ private:
 
 #endif
 
-class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public juce::AsyncUpdater
+class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public AsyncUpdater
 {
 public:
 #if JUCE_DIRECT2D_METRICS
@@ -169,12 +169,14 @@ public:
     void drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform) override;
     bool drawTextLayout(const AttributedString&, const Rectangle<float>&) override;
 
-    bool resized();
+    void resized();
 
-    void addDeferredRepaint(juce::Rectangle<int> deferredRepaint);
+    void addDeferredRepaint(Rectangle<int> deferredRepaint);
     bool needsRepaint();
-    bool startPartialAsynchronousPaint(int frameNumber);
-    void end();
+    void startSync();
+    void endSync();
+    bool startAsync(int frameNumber);
+    void endAsync();
 
     void setScaleFactor(double scale_);
     double getScaleFactor() const;
@@ -186,6 +188,8 @@ public:
     bool fillEllipse(Rectangle<float> area) override;
 
     std::function<void()> onPaintReady = nullptr;
+
+    CriticalSection resizeLock;
 
     //==============================================================================
 private:
