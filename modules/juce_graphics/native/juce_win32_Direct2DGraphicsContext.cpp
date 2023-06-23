@@ -25,11 +25,7 @@
 
 /*
 
-    -always do a full present after creating swap chain
-    -start/stop resizing
-
     -optimize save/restore state?
-    -command list?
     -vblank attachment
     -restart render thread on error?
     -conditional frame stats, frame history

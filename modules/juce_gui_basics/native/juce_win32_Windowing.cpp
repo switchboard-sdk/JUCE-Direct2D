@@ -3094,11 +3094,9 @@ private:
 
             direct2DContext->onPaintReady = [this]() 
             { 
-                jassert(direct2DContext->resizing == false);
-                    
                 if (direct2DContext->needsRepaint())
                 {
-                    handleDirect2DPaintAsync();
+                    handlePaintMessage();
                 }
             };
         }
