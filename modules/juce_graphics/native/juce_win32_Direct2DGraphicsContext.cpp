@@ -29,13 +29,13 @@
     -start/stop resizing
 
     -optimize save/restore state?
-    -command list?
     -vblank attachment
     -restart render thread on error?
     -conditional frame stats, frame history
     -move frame stats, frame history out of peer
     -minimize calls to SetTransform
     -text analyzer?
+    -Check use of InvalidateRect
 
 */
 
