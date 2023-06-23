@@ -3096,7 +3096,7 @@ private:
             { 
                 if (direct2DContext->needsRepaint())
                 {
-                    handleDirect2DPaintAsync();
+                    handlePaintMessage();
                 }
             };
         }

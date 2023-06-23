@@ -25,9 +25,6 @@
 
 /*
 
-    -always do a full present after creating swap chain
-    -start/stop resizing
-
     -optimize save/restore state?
     -vblank attachment
     -restart render thread on error?
