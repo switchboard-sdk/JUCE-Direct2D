@@ -1816,17 +1816,7 @@ public:
                                             roundToInt ((info.rcWindow.right  - info.rcClient.right)  / scaleFactor));
 
         #if JUCE_DIRECT2D
-        if (direct2DContext)
-        {
-            ScopedLock locker{ direct2DContext->resizeLock };
-
-            direct2DContext->resized();
-            //
-            // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
-            //
-            InvalidateRect(hwnd, nullptr, FALSE);
-            handleDirect2DPaintSync();
-        }
+        handleDirect2DResize();
         #endif
     }
 
@@ -1840,7 +1830,7 @@ public:
             return;
 
         const ScopedValueSetter<bool> scope (shouldIgnoreModalDismiss, true);
-
+        
         fullScreen = isNowFullScreen;
 
         auto newBounds = windowBorder.addedTo (bounds);
@@ -2929,15 +2919,6 @@ private:
 
 
 #if JUCE_DIRECT2D
-    void handleDirect2DPaintSync()
-    {
-        jassert(direct2DContext);
-
-        direct2DContext->startSync();
-        handlePaint(*direct2DContext);
-        direct2DContext->endSync();
-    }
-
     void handleDirect2DPaintAsync()
     {
         jassert(direct2DContext);
@@ -2949,6 +2930,19 @@ private:
         {
             handlePaint(*direct2DContext);
             direct2DContext->endAsync();
+        }
+    }
+
+    void handleDirect2DResize()
+    {
+        if (direct2DContext)
+        {
+            ScopedLock locker{ direct2DContext->resizeLock };
+
+            direct2DContext->resize();
+            direct2DContext->startSync();
+            handlePaint(*direct2DContext);
+            direct2DContext->endSync();
         }
     }
 #endif
@@ -3100,6 +3094,8 @@ private:
 
             direct2DContext->onPaintReady = [this]() 
             { 
+                jassert(direct2DContext->resizing == false);
+                    
                 if (direct2DContext->needsRepaint())
                 {
                     handleDirect2DPaintAsync();
@@ -3804,6 +3800,10 @@ private:
             r = RECTFromRectangle (convertLogicalScreenRectangleToPhysical (ScalingHelpers::scaledScreenPosToUnscaled (component, pos.toFloat()).toNearestInt(), hwnd));
         }
 
+#if JUCE_DIRECT2D
+        handleDirect2DResize();
+#endif
+
         return TRUE;
     }
 
@@ -3883,20 +3883,6 @@ private:
         handleMovedOrResized();
 #if JUCE_WAIT_FOR_VBLANK
         updateCurrentMonitorAndRefreshVBlankDispatcher();
-#endif
-
-#if JUCE_DIRECT2D
-        if (direct2DContext)
-        {
-            ScopedLock locker{ direct2DContext->resizeLock };
-
-            direct2DContext->resized();
-            //
-            // Direct2D backbuffer is gone; use InvalidateRect to make sure the entire window is redrawn
-            //
-            InvalidateRect(hwnd, nullptr, FALSE);
-            handleDirect2DPaintSync();
-        }
 #endif
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
@@ -4234,6 +4220,24 @@ private:
                     return 0;
 
                 break;
+
+             //==============================================================================
+#if JUCE_DIRECT2D
+            case WM_ENTERSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->startResizing();
+                }
+                break;
+
+            case WM_EXITSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->finishResizing();
+                    handleDirect2DResize();
+                }
+                break;
+#endif
 
             //==============================================================================
             case WM_SIZING:                  return handleSizeConstraining(*(RECT*)lParam, wParam);

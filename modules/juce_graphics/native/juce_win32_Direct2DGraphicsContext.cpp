@@ -25,6 +25,9 @@
 
 /*
 
+    -always do a full present after creating swap chain
+    -start/stop resizing
+
     -optimize save/restore state?
     -command list?
     -vblank attachment
@@ -387,7 +390,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
     }
 
-    void resized()
+    void resize()
     {
         //
         // Get the width & height from the client area; make sure width and height are between 1 and 16384
@@ -399,30 +402,18 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         {
             return;
         }
-
+ 
         bufferBounds = windowRect;
 
-        if (!isReadyToPaint())
-        {
-            return false;
-        }
-
         //
-        // Resize the swap chain 
+        // Resize the swap chain buffer
         //
-        if (threadDeviceContext != nullptr)
-        {
-            threadDeviceContext->SetTarget(nullptr); // xxx this may be redundant
-        }
-
         if (swapChain != nullptr)
         {
             swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
 
-            auto scaledWidth = roundToInt(bufferBounds.getWidth() * dpiScalingFactor);
-            auto scaledHeight = roundToInt(bufferBounds.getHeight() * dpiScalingFactor);
-            auto hr = swapChain->ResizeBuffers(0, scaledWidth, scaledHeight, DXGI_FORMAT_UNKNOWN, swapChainFlags);
-            InvalidateRect(hwnd, nullptr, FALSE); // Require entire window to redraw since the backbuffer is reallocating
+            auto scaledBufferBounds = bufferBounds * dpiScalingFactor;
+            auto hr = swapChain->ResizeBuffers(0, scaledBufferBounds.getWidth(), scaledBufferBounds.getHeight(), DXGI_FORMAT_UNKNOWN, swapChainFlags);
 
             if (SUCCEEDED(hr))
             {
@@ -446,6 +437,12 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         presentation->paintAreas.add(deferredRepaint);
     }
 
+    void clearDeferredRepaints()
+    {
+        auto* const presentation = presentations + presentationIndex;
+        presentation->paintAreas.clear();
+    }
+
     bool needsRepaint() const
     {
         auto* const presentation = presentations + presentationIndex;
@@ -457,8 +454,11 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         return presentations[presentationIndex ^ 1].state == Presentation::clear;
     }
 
-    void startRenderSync()
+    void startRenderSync(Rectangle<int>& initialClipBounds)
     {
+        clearDeferredRepaints();
+        paintedPresentation.store(nullptr);
+
         createDeviceContext();
         if (commandListDeviceContext != nullptr)
         {
@@ -469,6 +469,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 commandListDeviceContext->BeginDraw();
             }
         }
+
+        initialClipBounds = getClientRect();
     }
 
     void finishRenderSync()
@@ -476,7 +478,12 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         auto hr = commandListDeviceContext->EndDraw();
         commandListDeviceContext->SetTarget(nullptr);
 
-        swapChain->Present(presentSyncInterval, presentFlags);
+        if (SUCCEEDED(hr))
+        {
+            swapChain->Present(presentSyncInterval, presentFlags);
+        }
+
+        ValidateRect(hwnd, nullptr);
     }
 
     bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
@@ -563,9 +570,13 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
                 presentation->dirtyRectangles.clearQuick();
 
-                for (auto const& paintArea : presentation->paintAreas)
+                for (auto paintArea : presentation->paintAreas)
                 {
-                    presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea.getIntersection(bufferBounds)));
+                    paintArea = paintArea.getIntersection(bufferBounds);
+                    if (!paintArea.isEmpty())
+                    {
+                        presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
+                    }
                 }
 
                 presentation->bufferBounds = bufferBounds;
@@ -580,8 +591,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 releaseDeviceContext();
             }
         }
-
-        //DBG("finishRender\n");
     }
 
     void run() override
@@ -596,7 +605,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             wait(-1);
 
             ScopedTryLock locker{ owner.resizeLock };
-            if (!locker.isLocked())
+            if (!locker.isLocked() || owner.pimpl->resizing)
             {
                 continue;
             }
@@ -646,7 +655,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 presentation->presentStartTicks = Time::getHighResolutionTicks();
 #endif
 
-                if (0)//if (fullPresentDone && !presentation->presentEntireWindow)
+                if (fullPresentDone)
                 {
                     presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
                     presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
@@ -688,6 +697,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
     ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
 
     direct2d::UpdateRegion updateRegion;
+    bool resizing = false;
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
@@ -784,12 +794,6 @@ private:
                     }
 
                     presentation->reset();
-                }
-
-                if (that->resizePending)
-                {
-                    that->resized();
-                    that->resizePending = false;
                 }
 
                 if (that->owner.onPaintReady)
@@ -1275,7 +1279,7 @@ Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_)
     pimpl(new Pimpl(*this, hwnd_, direct2d::isTearingSupported()))
 #endif
 {
-    resized();
+    resize();
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
@@ -1283,9 +1287,20 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
     states.clear();
 }
 
-void Direct2DLowLevelGraphicsContext::resized()
+void Direct2DLowLevelGraphicsContext::startResizing()
 {
-    pimpl->resized();
+    pimpl->resizing = true;
+}
+
+void Direct2DLowLevelGraphicsContext::resize()
+{
+    pimpl->resize();
+}
+
+void Direct2DLowLevelGraphicsContext::finishResizing()
+{
+    pimpl->resizing = false;
+    pimpl->clearDeferredRepaints();
 }
 
 void Direct2DLowLevelGraphicsContext::addDeferredRepaint(Rectangle<int> deferredRepaint)
@@ -1303,6 +1318,11 @@ bool Direct2DLowLevelGraphicsContext::needsRepaint()
 
 bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
 {
+    if (pimpl->resizing)
+    {
+        return false;
+    }
+
     Rectangle<int> initialClipBounds;
     if (pimpl->startRenderAsync(frameNumber, initialClipBounds))
     {
@@ -1310,9 +1330,7 @@ bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
 
         if (initialClipBounds.isEmpty() == false)
         {
-            //DBG("   deferredRepaintsBounds " << deferredRepaintsBounds.toString());
             clipToRectangle(initialClipBounds);
-            //DBG("      clipRegion " << currentState->clipRegion.toString());
         }
 
         return true;
@@ -1336,8 +1354,15 @@ void Direct2DLowLevelGraphicsContext::endAsync()
 
 void Direct2DLowLevelGraphicsContext::startSync()
 {
-    pimpl->startRenderSync();
+    Rectangle<int> initialClipBounds;
+
+    pimpl->startRenderSync(initialClipBounds);
     saveState();
+
+    if (initialClipBounds.isEmpty() == false)
+    {
+        clipToRectangle(initialClipBounds);
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::endSync()
@@ -1882,7 +1907,7 @@ bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
 
 void Direct2DLowLevelGraphicsContext::handleAsyncUpdate()
 {
-    if (onPaintReady)
+    if (onPaintReady && !pimpl->resizing)
     {
         onPaintReady();
     }

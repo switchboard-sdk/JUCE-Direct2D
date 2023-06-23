@@ -169,7 +169,9 @@ public:
     void drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform) override;
     bool drawTextLayout(const AttributedString&, const Rectangle<float>&) override;
 
-    void resized();
+    void startResizing();
+    void resize();
+    void finishResizing();
 
     void addDeferredRepaint(Rectangle<int> deferredRepaint);
     bool needsRepaint();
