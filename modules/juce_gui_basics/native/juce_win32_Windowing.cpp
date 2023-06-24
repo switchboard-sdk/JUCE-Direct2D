@@ -1420,6 +1420,8 @@ private:
 };
 
 //==============================================================================
+#if JUCE_WAIT_FOR_VBLANK
+
 static HMONITOR getMonitorFromOutput (ComSmartPtr<IDXGIOutput> output)
 {
     DXGI_OUTPUT_DESC desc = {};
@@ -1659,6 +1661,8 @@ private:
 
 JUCE_IMPLEMENT_SINGLETON (VBlankDispatcher)
 
+#endif // JUCE_WAIT_FOR_VBLANK
+
 //==============================================================================
 class SimpleTimer  : private Timer
 {
@@ -1686,7 +1690,9 @@ private:
 
 //==============================================================================
 class HWNDComponentPeer  : public ComponentPeer,
+#if JUCE_WAIT_FOR_VBLANK
                            private VBlankListener,
+#endif
                            private Timer
                           #if JUCE_MODULE_AVAILABLE_juce_audio_plugin_client
                            , public ModifierKeyReceiver
@@ -1704,7 +1710,7 @@ public:
         : ComponentPeer (comp, windowStyleFlags),
           dontRepaint (nonRepainting),
           parentToAddTo (parent),
-          currentRenderingEngine (softwareRenderingEngine)
+          currentRenderingEngine (direct2DRenderingEngine)
     {
         callFunctionIfNotLocked (&createWindowCallback, this);
 
@@ -1725,10 +1731,12 @@ public:
             return ModifierKeys::currentModifiers;
         };
 
+#if JUCE_WAIT_FOR_VBLANK
         updateCurrentMonitorAndRefreshVBlankDispatcher();
 
         if (parentToAddTo != nullptr)
             monitorUpdateTimer.emplace (1000, [this] { updateCurrentMonitorAndRefreshVBlankDispatcher(); });
+#endif
 
         suspendResumeRegistration = ScopedSuspendResumeNotificationRegistration { hwnd };
     }
@@ -1737,7 +1745,9 @@ public:
     {
         suspendResumeRegistration = {};
 
+#if JUCE_WAIT_FOR_VBLANK
         VBlankDispatcher::getInstance()->removeListener (*this);
+#endif
 
         // do this first to avoid messages arriving for this window before it's destroyed
         JuceWindowIdentifier::setAsJUCEWindow (hwnd, false);
@@ -1757,9 +1767,9 @@ public:
             dropTarget = nullptr;
         }
 
-       #if JUCE_DIRECT2D
+        #if JUCE_DIRECT2D
         direct2DContext = nullptr;
-       #endif
+        #endif
     }
 
     //==============================================================================
@@ -1802,10 +1812,9 @@ public:
                                             roundToInt ((info.rcWindow.bottom - info.rcClient.bottom) / scaleFactor),
                                             roundToInt ((info.rcWindow.right  - info.rcClient.right)  / scaleFactor));
 
-       #if JUCE_DIRECT2D
-        if (direct2DContext != nullptr)
-            direct2DContext->resized();
-       #endif
+        #if JUCE_DIRECT2D
+        handleDirect2DResize();
+        #endif
     }
 
     void setBounds (const Rectangle<int>& bounds, bool isNowFullScreen) override
@@ -1818,7 +1827,7 @@ public:
             return;
 
         const ScopedValueSetter<bool> scope (shouldIgnoreModalDismiss, true);
-
+        
         fullScreen = isNowFullScreen;
 
         auto newBounds = windowBorder.addedTo (bounds);
@@ -2110,6 +2119,7 @@ public:
             DestroyCaret();
     }
 
+#if JUCE_WAIT_FOR_VBLANK
     void repaint (const Rectangle<int>& area) override
     {
         deferredRepaints.add ((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
@@ -2147,6 +2157,39 @@ public:
         vBlankListeners.call ([] (auto& l) { l.onVBlank(); });
         dispatchDeferredRepaints();
     }
+#else
+    void repaint(const Rectangle<int>& area) override
+    {
+#if JUCE_DIRECT2D
+        if (direct2DContext)
+        {
+            direct2DContext->addDeferredRepaint((area.toDouble() * getPlatformScaleFactor()).getSmallestIntegerContainer());
+        }
+        else
+#endif
+        {
+            auto r = RECTFromRectangle(area);
+            InvalidateRect(hwnd, &r, FALSE);
+        }
+    }
+
+    void performAnyPendingRepaintsNow() override
+    {
+        if (component.isVisible())
+        {
+#if JUCE_DIRECT2D
+            if (direct2DContext)
+            {
+                handleDirect2DPaintAsync();
+            }
+            else
+#endif
+            {
+                jassertfalse; // xxx fix this
+            }
+        }
+    }
+#endif
 
     //==============================================================================
     static HWNDComponentPeer* getOwnerOfWindow (HWND h) noexcept
@@ -2381,6 +2424,7 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
+    int frameNumber = 0;
    #endif
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
@@ -2611,6 +2655,13 @@ private:
         if ((styleFlags & windowIgnoresMouseClicks) != 0)   exstyle |= WS_EX_TRANSPARENT;
         if ((styleFlags & windowIsSemiTransparent) != 0)    exstyle |= WS_EX_LAYERED;
 
+#if JUCE_DIRECT2D
+        if (direct2DContext)
+        {
+            exstyle |= WS_EX_NOREDIRECTIONBITMAP;
+        }
+#endif
+        
         hwnd = CreateWindowEx (exstyle, WindowClassHolder::getInstance()->getWindowClassName(),
                                L"", type, 0, 0, 0, 0, parentToAddTo, nullptr,
                                (HINSTANCE) Process::getCurrentModuleInstanceHandle(), nullptr);
@@ -2804,19 +2855,10 @@ private:
        #if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
-            RECT r;
-
-            if (GetUpdateRect (hwnd, &r, false))
-            {
-                direct2DContext->start();
-                direct2DContext->clipToRectangle (convertPhysicalScreenRectangleToLogical (rectangleFromRECT (r), hwnd));
-                handlePaint (*direct2DContext);
-                direct2DContext->end();
-                ValidateRect (hwnd, &r);
-            }
+            handleDirect2DPaintAsync();
         }
         else
-       #endif
+#endif
         {
             HRGN rgn = CreateRectRgn (0, 0, 0, 0);
             const int regionType = GetUpdateRgn (hwnd, rgn, false);
@@ -2850,6 +2892,35 @@ private:
 
         lastPaintTime = Time::getMillisecondCounter();
     }
+    
+#if JUCE_DIRECT2D
+    void handleDirect2DPaintAsync()
+    {
+        jassert(direct2DContext);
+
+        //
+        // startAsync returns true if there are any areas to be painted
+        //
+        if (direct2DContext->startAsync(frameNumber))
+        {
+            handlePaint(*direct2DContext);
+            direct2DContext->endAsync();
+        }
+    }
+
+    void handleDirect2DResize()
+    {
+        if (direct2DContext)
+        {
+            ScopedLock locker{ direct2DContext->resizeLock };
+
+            direct2DContext->resize();
+            direct2DContext->startSync();
+            handlePaint(*direct2DContext);
+            direct2DContext->endSync();
+        }
+    }
+#endif
 
     void performPaint (HDC dc, HRGN rgn, int regionType, PAINTSTRUCT& paintStruct)
     {
@@ -2977,10 +3048,31 @@ private:
    #if JUCE_DIRECT2D
     void updateDirect2DContext()
     {
+        auto exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+
         if (currentRenderingEngine != direct2DRenderingEngine)
+        {
             direct2DContext = nullptr;
+
+            exStyle &= ~WS_EX_NOREDIRECTIONBITMAP;
+        }
         else if (direct2DContext == nullptr)
-            direct2DContext.reset (new Direct2DLowLevelGraphicsContext (hwnd));
+        {
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd);
+            direct2DContext->setScaleFactor(getPlatformScaleFactor());
+
+            exStyle |= WS_EX_NOREDIRECTIONBITMAP;
+
+            direct2DContext->onPaintReady = [this]() 
+            { 
+                if (direct2DContext->needsRepaint())
+                {
+                    handlePaintMessage();
+                }
+            };
+        }
+
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
     }
    #endif
 
@@ -3677,6 +3769,10 @@ private:
             r = RECTFromRectangle (convertLogicalScreenRectangleToPhysical (ScalingHelpers::scaledScreenPosToUnscaled (component, pos.toFloat()).toNearestInt(), hwnd));
         }
 
+#if JUCE_DIRECT2D
+        handleDirect2DResize();
+#endif
+
         return TRUE;
     }
 
@@ -3728,6 +3824,7 @@ private:
         yes
     };
 
+#if JUCE_WAIT_FOR_VBLANK
     void updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher force = ForceRefreshDispatcher::no)
     {
         auto monitor = MonitorFromWindow (hwnd, MONITOR_DEFAULTTONULL);
@@ -3735,6 +3832,7 @@ private:
         if (std::exchange (currentMonitor, monitor) != monitor || force == ForceRefreshDispatcher::yes)
             VBlankDispatcher::getInstance()->updateDisplay (*this, currentMonitor);
     }
+#endif
 
     bool handlePositionChanged()
     {
@@ -3752,7 +3850,9 @@ private:
         }
 
         handleMovedOrResized();
+#if JUCE_WAIT_FOR_VBLANK
         updateCurrentMonitorAndRefreshVBlankDispatcher();
+#endif
 
         return ! dontRepaint; // to allow non-accelerated openGL windows to draw themselves correctly.
     }
@@ -3795,6 +3895,13 @@ private:
             jassertfalse;
             return 0;
         }
+
+#if JUCE_DIRECT2D
+        if (direct2DContext != nullptr)
+        {
+            direct2DContext->setScaleFactor(newScale);
+        }
+#endif
 
         updateShadower();
         InvalidateRect (hwnd, nullptr, FALSE);
@@ -3908,9 +4015,11 @@ private:
                                                                                               .getDisplayForRect (component.getScreenBounds())->userArea),
                           SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_NOSENDCHANGING);
 
+#if JUCE_WAIT_FOR_VBLANK
         auto* dispatcher = VBlankDispatcher::getInstance();
         dispatcher->reconfigureDisplays();
         updateCurrentMonitorAndRefreshVBlankDispatcher (ForceRefreshDispatcher::yes);
+#endif
     }
 
     //==============================================================================
@@ -4000,7 +4109,12 @@ private:
                 return 0;
 
             case WM_NCPAINT:
-                handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+#if JUCE_DIRECT2D
+                if (direct2DContext == nullptr)
+#endif
+                {
+                    handlePaintMessage(); // this must be done, even with native titlebars, or there are rendering artifacts.
+                }
 
                 if (hasTitleBar())
                     break; // let the DefWindowProc handle drawing the frame.
@@ -4070,6 +4184,24 @@ private:
                     return 0;
 
                 break;
+
+             //==============================================================================
+#if JUCE_DIRECT2D
+            case WM_ENTERSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->startResizing();
+                }
+                break;
+
+            case WM_EXITSIZEMOVE:
+                if (direct2DContext)
+                {
+                    direct2DContext->finishResizing();
+                    handleDirect2DResize();
+                }
+                break;
+#endif
 
             //==============================================================================
             case WM_SIZING:                  return handleSizeConstraining (*(RECT*) lParam, wParam);

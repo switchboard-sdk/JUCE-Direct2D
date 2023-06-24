@@ -714,30 +714,74 @@ void GlyphArrangement::draw (const Graphics& g, AffineTransform transform) const
     auto lastFont = context.getFont();
     bool needToRestore = false;
 
-    for (int i = 0; i < glyphs.size(); ++i)
+    if (context.supportsGlyphRun())
     {
-        auto& pg = glyphs.getReference (i);
+        //
+        // Send multiple glyphs at once to the low-level graphics context
+        // 
+        Array<LowLevelGraphicsContext::Glyph> glyphRun;
+        glyphRun.ensureStorageAllocated(glyphs.size());
 
-        if (pg.font.isUnderlined())
-            drawGlyphUnderline (g, pg, i, transform);
-
-        if (! pg.isWhitespace())
+        for (int i = 0; i < glyphs.size(); ++i)
         {
-            if (lastFont != pg.font)
-            {
-                lastFont = pg.font;
+            auto const& pg = glyphs.getReference(i);
 
-                if (! needToRestore)
+            if (!pg.isWhitespace())
+            {
+                if (lastFont != pg.font)
                 {
-                    needToRestore = true;
-                    context.saveState();
+                    lastFont = pg.font;
+
+                    if (!needToRestore)
+                    {
+                        needToRestore = true;
+                        context.saveState();
+                    }
+
+                    context.drawGlyphRun(glyphRun, transform);
+                    glyphRun.clearQuick();
+
+                    context.setFont(lastFont);
                 }
 
-                context.setFont (lastFont);
+                glyphRun.add({ pg.glyph, pg.x, pg.y, pg.w });
             }
+        }
 
-            context.drawGlyph (pg.glyph, AffineTransform::translation (pg.x, pg.y)
-                                                         .followedBy (transform));
+        context.drawGlyphRun(glyphRun, transform);
+    }
+    else
+    {
+        //
+        // Send one glyph at a time to the low-level graphics context
+        // 
+        for (int i = 0; i < glyphs.size(); ++i)
+        {
+            auto& pg = glyphs.getReference(i);
+
+            if (pg.font.isUnderlined())
+                drawGlyphUnderline(g, pg, i, transform);
+
+            if (!pg.isWhitespace())
+            {
+                if (lastFont != pg.font)
+                {
+                    lastFont = pg.font;
+
+                    if (!needToRestore)
+                    {
+                        needToRestore = true;
+                        context.saveState();
+                    }
+
+                    context.setFont(lastFont);
+                }
+
+                auto tx = AffineTransform::translation(pg.x, pg.y)
+                    .followedBy(transform);
+
+                context.drawGlyph(pg.glyph, tx);
+            }
         }
     }
 

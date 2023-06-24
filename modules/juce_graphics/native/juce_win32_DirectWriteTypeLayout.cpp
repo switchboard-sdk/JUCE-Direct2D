@@ -239,7 +239,7 @@ namespace DirectWriteTypeLayout
             case Justification::left:                   break;
             case Justification::right:                  alignment = DWRITE_TEXT_ALIGNMENT_TRAILING; break;
             case Justification::horizontallyCentred:    alignment = DWRITE_TEXT_ALIGNMENT_CENTER; break;
-            case Justification::horizontallyJustified:  break; // DirectWrite cannot justify text, default to left alignment
+            case Justification::horizontallyJustified:  alignment = DWRITE_TEXT_ALIGNMENT_JUSTIFIED; break; // DirectWrite cannot justify text, default to left alignment
             default:                                    jassertfalse; break; // Illegal justification flags
         }
 
@@ -459,8 +459,32 @@ namespace DirectWriteTypeLayout
             renderTarget.CreateSolidColorBrush (D2D1::ColorF (0.0f, 0.0f, 0.0f, 1.0f),
                                                 d2dBrush.resetAndGetPointerAddress());
 
-            renderTarget.DrawTextLayout (D2D1::Point2F ((float) area.getX(), (float) area.getY()),
-                                         dwTextLayout, d2dBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            //
+            // Calling SetParagraphAlignment for vertical alignment didn't work with some of the text layouts in the JUCE demo;
+            // do it manually here instead.
+            //
+            auto y = (float)area.getY();
+            switch (text.getJustification().getOnlyVerticalFlags())
+            {
+            case Justification::verticallyCentred:
+            {
+                DWRITE_TEXT_METRICS metrics;
+                dwTextLayout->GetMetrics(&metrics);
+                y += ((float)area.getHeight() - metrics.height) * 0.5f;
+                break;
+            }
+
+            case Justification::bottom:
+            {
+                DWRITE_TEXT_METRICS metrics;
+                dwTextLayout->GetMetrics(&metrics);
+                y += (float)area.getHeight() - metrics.height;
+                break;
+            }
+            }
+
+            renderTarget.DrawTextLayout (D2D1::Point2F ((float) area.getX(), y),
+                                         dwTextLayout, d2dBrush, D2D1_DRAW_TEXT_OPTIONS_NONE);
         }
     }
 }
@@ -491,7 +515,7 @@ bool TextLayout::createNativeLayout ([[maybe_unused]] const AttributedString& te
 
     SharedResourcePointer<Direct2DFactories> factories;
 
-    if (factories->d2dFactory != nullptr
+    if (factories->d2dSharedFactory != nullptr
         && factories->directWriteFactory != nullptr
         && factories->systemFonts != nullptr
         && factories->directWriteRenderTarget != nullptr)

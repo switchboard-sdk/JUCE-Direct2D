@@ -23,127 +23,908 @@
   ==============================================================================
 */
 
+/*
+
+    -optimize save/restore state?
+    -vblank attachment
+    -restart render thread on error?
+    -conditional frame stats, frame history
+    -move frame stats, frame history out of peer
+    -minimize calls to SetTransform
+    -text analyzer?
+    -Check use of InvalidateRect
+
+*/
+
 namespace juce
 {
 
-template <typename Type>
-D2D1_RECT_F rectangleToRectF (const Rectangle<Type>& r)
-{
-    return { (float) r.getX(), (float) r.getY(), (float) r.getRight(), (float) r.getBottom() };
-}
-
-static D2D1_COLOR_F colourToD2D (Colour c)
-{
-    return { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha() };
-}
-
-static void pathToGeometrySink (const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
-{
-    Path::Iterator it (path);
-
-    while (it.next())
+    namespace direct2d
     {
-        switch (it.elementType)
+        template <typename Type>
+        D2D1_RECT_F rectangleToRectF(const Rectangle<Type>& r)
         {
-        case Path::Iterator::cubicTo:
-        {
-            transform.transformPoint (it.x1, it.y1);
-            transform.transformPoint (it.x2, it.y2);
-            transform.transformPoint (it.x3, it.y3);
-
-            sink->AddBezier ({ { it.x1, it.y1 }, { it.x2, it.y2 }, { it.x3, it.y3 } });
-            break;
+            return { (float)r.getX(), (float)r.getY(), (float)r.getRight(), (float)r.getBottom() };
         }
 
-        case Path::Iterator::lineTo:
+        template <typename Type>
+        RECT rectangleToRECT(const Rectangle<Type>& r)
         {
-            transform.transformPoint (it.x1, it.y1);
-            sink->AddLine ({ it.x1, it.y1 });
-            break;
+            return { r.getX(), r.getY(), r.getRight(), r.getBottom() };
         }
 
-        case Path::Iterator::quadraticTo:
+        template <typename Type>
+        Rectangle<int> RECTToRectangle(RECT const& r)
         {
-            transform.transformPoint (it.x1, it.y1);
-            transform.transformPoint (it.x2, it.y2);
-            sink->AddQuadraticBezier ({ { it.x1, it.y1 }, { it.x2, it.y2 } });
-            break;
+            return Rectangle<int>::leftTopRightBottom(r.left, r.top, r.right, r.bottom);
         }
 
-        case Path::Iterator::closePath:
+        static D2D1_COLOR_F colourToD2D(Colour c)
         {
-            sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-            break;
+            return { c.getFloatRed(), c.getFloatGreen(), c.getFloatBlue(), c.getFloatAlpha() };
         }
 
-        case Path::Iterator::startNewSubPath:
+        static bool isTransformOnlyTranslationOrScale(AffineTransform const& transform)
         {
-            transform.transformPoint (it.x1, it.y1);
-            sink->BeginFigure ({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
-            break;
+            return approximatelyEqual(transform.mat01, 0.0f) && approximatelyEqual(transform.mat10, 0.0f);
         }
+
+        static void pathToGeometrySink(const Path& path, ID2D1GeometrySink* sink, const AffineTransform& transform)
+        {
+            //
+            // Every call to BeginFigure must have a matching call to EndFigure. But - the Path does not necessarily
+            // have matching startNewSubPath and closePath markers. The figureStarted flag indicates if an extra call
+            // to BeginFigure or EndFigure is needed during the iteration loop or when exiting this function.
+            //
+            Path::Iterator it(path);
+            bool figureStarted = false;
+
+            while (it.next())
+            {
+                switch (it.elementType)
+                {
+                case Path::Iterator::cubicTo:
+                {
+                    jassert(figureStarted);
+
+                    transform.transformPoint(it.x1, it.y1);
+                    transform.transformPoint(it.x2, it.y2);
+                    transform.transformPoint(it.x3, it.y3);
+
+                    sink->AddBezier({ { it.x1, it.y1 }, { it.x2, it.y2 }, { it.x3, it.y3 } });
+                    break;
+                }
+
+                case Path::Iterator::lineTo:
+                {
+                    jassert(figureStarted);
+
+                    transform.transformPoint(it.x1, it.y1);
+                    sink->AddLine({ it.x1, it.y1 });
+                    break;
+                }
+
+                case Path::Iterator::quadraticTo:
+                {
+                    jassert(figureStarted);
+
+                    transform.transformPoint(it.x1, it.y1);
+                    transform.transformPoint(it.x2, it.y2);
+                    sink->AddQuadraticBezier({ { it.x1, it.y1 }, { it.x2, it.y2 } });
+                    break;
+                }
+
+                case Path::Iterator::closePath:
+                {
+                    if (figureStarted)
+                    {
+                        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                        figureStarted = false;
+                    }
+                    break;
+                }
+
+                case Path::Iterator::startNewSubPath:
+                {
+                    if (figureStarted)
+                    {
+                        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                    }
+
+                    transform.transformPoint(it.x1, it.y1);
+                    sink->BeginFigure({ it.x1, it.y1 }, D2D1_FIGURE_BEGIN_FILLED);
+                    figureStarted = true;
+                    break;
+                }
+                }
+            }
+
+            if (figureStarted)
+            {
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            }
         }
-    }
-}
 
-static D2D1::Matrix3x2F transformToMatrix (const AffineTransform& transform)
-{
-    return { transform.mat00, transform.mat10, transform.mat01, transform.mat11, transform.mat02, transform.mat12 };
-}
+        static D2D1::Matrix3x2F transformToMatrix(const AffineTransform& transform)
+        {
+            return { transform.mat00, transform.mat10, transform.mat01, transform.mat11, transform.mat02, transform.mat12 };
+        }
 
-static D2D1_POINT_2F pointTransformed (int x, int y, const AffineTransform& transform)
-{
-    transform.transformPoint (x, y);
-    return { (FLOAT) x, (FLOAT) y };
-}
+        static D2D1_POINT_2F pointTransformed(int x, int y, const AffineTransform& transform)
+        {
+            transform.transformPoint(x, y);
+            return { (FLOAT)x, (FLOAT)y };
+        }
 
-static void rectToGeometrySink (const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform)
-{
-    sink->BeginFigure (pointTransformed (rect.getX(),     rect.getY(),       transform), D2D1_FIGURE_BEGIN_FILLED);
-    sink->AddLine     (pointTransformed (rect.getRight(), rect.getY(),       transform));
-    sink->AddLine     (pointTransformed (rect.getRight(), rect.getBottom(),  transform));
-    sink->AddLine     (pointTransformed (rect.getX(),     rect.getBottom(),  transform));
-    sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-}
+        static void rectToGeometrySink(const Rectangle<int>& rect, ID2D1GeometrySink* sink, const AffineTransform& transform)
+        {
+            sink->BeginFigure(pointTransformed(rect.getX(), rect.getY(), transform), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(pointTransformed(rect.getRight(), rect.getY(), transform));
+            sink->AddLine(pointTransformed(rect.getRight(), rect.getBottom(), transform));
+            sink->AddLine(pointTransformed(rect.getX(), rect.getBottom(), transform));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        }
+
+        bool isTearingSupported()
+        {
+            // Rather than create the 1.5 factory interface directly, we create the 1.4
+            // interface and query for the 1.5 interface. This will enable the graphics
+            // debugging tools which might not support the 1.5 factory interface.
+            ComSmartPtr<IDXGIFactory4> factory4;
+            auto hr = CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)factory4.resetAndGetPointerAddress());
+            if (SUCCEEDED(hr))
+            {
+                auto factory5 = factory4.getInterface<IDXGIFactory5>();
+                if (factory5)
+                {
+                    BOOL allowTearing;
+                    hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+                    return SUCCEEDED(hr) && allowTearing;
+                }
+            }
+
+            return false;
+        }
+
+        class UpdateRegion
+        {
+        public:
+            ~UpdateRegion()
+            {
+                clear();
+            }
+
+            void refresh(HWND windowHandle)
+            {
+                numRect = 0;
+
+                regionHandle = CreateRectRgn(0, 0, 0, 0);
+                auto regionType = GetUpdateRgn(windowHandle, regionHandle, false);
+                if (regionType == SIMPLEREGION || regionType == COMPLEXREGION)
+                {
+                    auto regionDataBytes = GetRegionData(regionHandle, (DWORD)block.getSize(), (RGNDATA*)block.getData());
+                    if (regionDataBytes > block.getSize())
+                    {
+                        block.ensureSize(regionDataBytes);
+                        regionDataBytes = GetRegionData(regionHandle, (DWORD)block.getSize(), (RGNDATA*)block.getData());
+                    }
+
+                    if (regionDataBytes > 0)
+                    {
+                        auto header = (RGNDATAHEADER const* const)block.getData();
+                        if (header->iType == RDH_RECTANGLES)
+                        {
+                            numRect = header->nCount;
+                        }
+                    }
+                }
+            }
+
+            void clear()
+            {
+                numRect = 0;
+                DeleteObject(regionHandle);
+                regionHandle = nullptr;
+            }
+
+            uint32 getNumRECT() const
+            {
+                return numRect;
+            }
+
+            RECT* getRECTArray()
+            {
+                auto header = (RGNDATAHEADER const* const)block.getData();
+                return (RECT*)(header + 1);
+            }
+
+            void addToRectangleList(RectangleList<int>& rectangleList)
+            {
+                rectangleList.ensureStorageAllocated(rectangleList.getNumRectangles() + getNumRECT());
+                for (uint32 i = 0; i < getNumRECT(); ++i)
+                {
+                    rectangleList.add(RECTToRectangle<int>(getRECTArray()[i]));
+                }
+            }
+
+            HRGN regionHandle = nullptr;
+
+        private:
+            MemoryBlock block{ 1024 };
+            uint32 numRect = 0;
+        };
+
+    } // namespace Direct2D
 
 //==============================================================================
-struct Direct2DLowLevelGraphicsContext::Pimpl
+
+struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 {
-    ID2D1PathGeometry* rectListToPathGeometry (const RectangleList<int>& clipRegion)
+    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
+        Thread("Direct2DLowLevelGraphicsContext"),
+        hwnd(hwnd_),
+        owner(owner_),
+        swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
+        bufferCount(2),
+        dxgiScaling(DXGI_SCALING_STRETCH),
+        swapChainFlags(tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
+        presentSyncInterval(tearingSupported_ ? 0 : 1),
+        presentFlags(tearingSupported_ ? DXGI_PRESENT_ALLOW_TEARING : 0)
     {
-        ID2D1PathGeometry* p = nullptr;
-        factories->d2dFactory->CreatePathGeometry (&p);
+#if JUCE_DEBUG
+        D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_INFORMATION };
+#else
+        D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_NONE };
+#endif
 
-        ComSmartPtr<ID2D1GeometrySink> sink;
-        auto hr = p->Open (sink.resetAndGetPointerAddress()); // xxx handle error
-        sink->SetFillMode (D2D1_FILL_MODE_WINDING);
+        auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
+        jassertquiet(SUCCEEDED(hr));
 
-        for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-            rectToGeometrySink (clipRegion.getRectangle(i), sink, AffineTransform());
-
-        hr = sink->Close();
-        return p;
+        startThread(Priority::highest);
     }
 
-    ID2D1PathGeometry* pathToPathGeometry (const Path& path, const AffineTransform& transform)
+    ~Pimpl() override
     {
-        ID2D1PathGeometry* p = nullptr;
-        factories->d2dFactory->CreatePathGeometry (&p);
-
-        ComSmartPtr<ID2D1GeometrySink> sink;
-        auto hr = p->Open (sink.resetAndGetPointerAddress());
-        sink->SetFillMode (D2D1_FILL_MODE_WINDING); // xxx need to check Path::isUsingNonZeroWinding()
-
-        pathToGeometrySink (path, sink, transform);
-
-        hr = sink->Close();
-        return p;
+        stopThread(1000);
     }
 
-    SharedResourcePointer<Direct2DFactories> factories;
+    //
+    // ScopedGeometryWithSink creates an ID2D1PathGeometry object with an open sink. 
+    // D.R.Y. for rectToPathGeometry, rectListToPathGeometry, and pathToPathGeometry
+    //
+    struct ScopedGeometryWithSink
+    {
+        ScopedGeometryWithSink(ID2D1Factory* factory, D2D1_FILL_MODE fillMode)
+        {
+            auto hr = factory->CreatePathGeometry(geometry.resetAndGetPointerAddress());
+            if (SUCCEEDED(hr))
+            {
+                hr = geometry->Open(sink.resetAndGetPointerAddress());
+                if (SUCCEEDED(hr))
+                {
+                    sink->SetFillMode(fillMode);
+                }
+            }
+        }
 
-    ComSmartPtr<ID2D1HwndRenderTarget> renderingTarget;
+        ~ScopedGeometryWithSink()
+        {
+            if (sink != nullptr)
+            {
+                auto hr = sink->Close();
+                jassertquiet(SUCCEEDED(hr));
+            }
+        }
+
+        ComSmartPtr<ID2D1PathGeometry> geometry;
+        ComSmartPtr<ID2D1GeometrySink> sink;
+    };
+
+    ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+    {
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
+
+        if (objects.sink != nullptr)
+        {
+            direct2d::rectToGeometrySink(rect, objects.sink, transform);
+            return { (ID2D1Geometry*)objects.geometry };
+        }
+
+        return nullptr;
+    }
+
+    ComSmartPtr<ID2D1Geometry> rectListToPathGeometry (const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+    {
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
+
+        if (objects.sink != nullptr)
+        {
+            for (int i = clipRegion.getNumRectangles(); --i >= 0;)
+                direct2d::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+
+            return { (ID2D1Geometry*)objects.geometry };
+        }
+
+        return nullptr;
+    }
+
+    ComSmartPtr<ID2D1Geometry> pathToPathGeometry (const Path& path, const AffineTransform& transform)
+    {
+        ScopedGeometryWithSink objects{ d2dDedicatedFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
+
+        if (objects.sink != nullptr)
+        {
+            direct2d::pathToGeometrySink(path, objects.sink, transform);
+
+            return { (ID2D1Geometry*)objects.geometry };
+        }
+
+        return nullptr;
+    }
+
+    ID2D1DeviceContext* const getDeviceContext() const 
+    {
+        return commandListDeviceContext;
+    }
+
+    ID2D1SolidColorBrush* const getColourBrush() const
+    {
+        return colourBrush;
+    }
+
+    Rectangle<int> getClientRect() const
+    {
+        RECT windowRect;
+        GetClientRect(hwnd, &windowRect);
+
+        return Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
+    }
+
+    void resize()
+    {
+        //
+        // Get the width & height from the client area; make sure width and height are between 1 and 16384
+        //
+        int constexpr minSize = 1;
+        int constexpr maxSize = 16384;
+        auto windowRect = getClientRect().getUnion({ minSize, minSize }).getIntersection({ maxSize, maxSize });
+        if (bufferBounds == windowRect)
+        {
+            return;
+        }
+ 
+        bufferBounds = windowRect;
+
+        //
+        // Resize the swap chain buffer
+        //
+        if (swapChain != nullptr)
+        {
+            swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
+
+            auto scaledBufferBounds = bufferBounds * dpiScalingFactor;
+            auto hr = swapChain->ResizeBuffers(0, scaledBufferBounds.getWidth(), scaledBufferBounds.getHeight(), DXGI_FORMAT_UNKNOWN, swapChainFlags);
+
+            if (SUCCEEDED(hr))
+            {
+                createSwapChainBuffer();
+            }
+            else
+            {
+                releaseDeviceContext();
+            }
+        }
+    }
+
+    Rectangle<int> getBufferBounds() const
+    {
+        return bufferBounds;
+    }
+
+    void addDeferredRepaint(Rectangle<int> deferredRepaint)
+    {
+        auto* const presentation = presentations + presentationIndex;
+        presentation->paintAreas.add(deferredRepaint);
+    }
+
+    void clearDeferredRepaints()
+    {
+        auto* const presentation = presentations + presentationIndex;
+        presentation->paintAreas.clear();
+    }
+
+    bool needsRepaint() const
+    {
+        auto* const presentation = presentations + presentationIndex;
+        return presentation->paintAreas.getNumRectangles() > 0;
+    }
+
+    bool isReadyToPaint() const
+    {
+        return presentations[presentationIndex ^ 1].state == Presentation::clear;
+    }
+
+    void startRenderSync(Rectangle<int>& initialClipBounds)
+    {
+        clearDeferredRepaints();
+        paintedPresentation.store(nullptr);
+
+        createDeviceContext();
+        if (commandListDeviceContext != nullptr)
+        {
+            createSwapChainBuffer();
+            if (swapChainBuffer != nullptr)
+            {
+                commandListDeviceContext->SetTarget(swapChainBuffer);
+                commandListDeviceContext->BeginDraw();
+            }
+        }
+
+        initialClipBounds = getClientRect();
+    }
+
+    void finishRenderSync()
+    {
+        auto hr = commandListDeviceContext->EndDraw();
+        commandListDeviceContext->SetTarget(nullptr);
+
+        if (SUCCEEDED(hr))
+        {
+            swapChain->Present(presentSyncInterval, presentFlags);
+        }
+
+        ValidateRect(hwnd, nullptr);
+    }
+
+    bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
+    {
+        //
+        // Ready to paint? Return if the previous presentation has not been presented
+        //
+        if (!isReadyToPaint())
+        {
+            return false;
+        }
+
+        auto* const presentation = presentations + presentationIndex;
+
+        //
+        // Any areas to update?
+        //
+        updateRegion.refresh(hwnd);
+        if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
+        {
+            return false;
+        }
+        updateRegion.addToRectangleList(presentation->paintAreas);
+        ValidateRgn(hwnd, updateRegion.regionHandle);
+
+        initialClipBounds = presentation->paintAreas.getBounds();
+
+        //
+        // Start painting
+        //
+        presentation->frameNumber = frameNumber;
+        presentation->state = Presentation::painting;
+
+#if 0 // JUCE_DEBUG
+        for (auto const area : presentation->paintAreas)
+        {
+            DBG("   area " << area.toString());
+        }
+
+        for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
+        {
+            DBG("   update " << direct2d::RECTToRectangle<int>(updateRegion.getRECTArray()[i]).toString());
+        }
+#endif
+
+        createDeviceContext();
+        if (commandListDeviceContext != nullptr)
+        {
+            createSwapChainBuffer();
+            if (swapChainBuffer != nullptr)
+            {
+                commandListDeviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
+                commandListDeviceContext->SetTarget(presentation->commandList);
+                commandListDeviceContext->BeginDraw();
+            }
+        }
+
+        return true;
+    }
+
+    void finishRenderAsync()
+    {
+        if (commandListDeviceContext != nullptr && swapChain != nullptr)
+        {
+            auto* const presentation = presentations + presentationIndex;
+
+            auto hr = commandListDeviceContext->EndDraw();
+            commandListDeviceContext->SetTarget(nullptr);
+            presentation->commandList->Close();
+            if (FAILED(hr))
+            {
+                return;
+            }
+
+            auto paintBounds = presentation->paintAreas.getBounds();
+            if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
+            {
+                return;
+            }
+
+            presentation->state = Presentation::painted;
+
+            {
+                presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
+                presentation->dirtyRectangles.clearQuick();
+
+                for (auto paintArea : presentation->paintAreas)
+                {
+                    paintArea = paintArea.getIntersection(bufferBounds);
+                    if (!paintArea.isEmpty())
+                    {
+                        presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
+                    }
+                }
+
+                presentation->bufferBounds = bufferBounds;
+            }
+
+            paintedPresentation.store(presentation);
+            presentationIndex ^= 1;
+            notify();
+
+            if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+            {
+                releaseDeviceContext();
+            }
+        }
+    }
+
+    void run() override
+    {
+        bool fullPresentDone = false;
+
+        while (!threadShouldExit())
+        {
+            //
+            // Wait until a presentation is ready
+            //
+            wait(-1);
+
+            ScopedTryLock locker{ owner.resizeLock };
+            if (!locker.isLocked() || owner.pimpl->resizing)
+            {
+                continue;
+            }
+
+            //
+            // Is a presentation ready?
+            //
+            auto presentation = paintedPresentation.exchange(nullptr);
+            if (presentation == nullptr)
+            {
+                continue;
+            }
+
+            jassert(presentation->state == Presentation::painted);
+
+            //
+            // Render the command list
+            //
+            if (threadDeviceContext == nullptr ||
+                swapChain == nullptr ||
+                swapChainBuffer == nullptr ||
+                presentation->commandList == nullptr)
+            {
+                presentation->status = E_UNEXPECTED;
+                PresentDoneMessage::createAndPost(this, presentation);
+                continue;
+            }
+
+            threadDeviceContext->SetTarget(swapChainBuffer);
+            threadDeviceContext->BeginDraw();
+            threadDeviceContext->DrawImage(presentation->commandList);
+            presentation->status = threadDeviceContext->EndDraw();
+            threadDeviceContext->SetTarget(nullptr);
+
+            //
+            // If this swap chain buffer has never been painted, present the entire window
+            // 
+            // Otherwise, present the update region
+            //
+            {
+                DXGI_PRESENT_PARAMETERS presentParameters{};
+
+                if (fullPresentDone)
+                {
+                    presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
+                    presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
+                }
+
+                presentation->status = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                jassert(SUCCEEDED(presentation->status));
+
+                fullPresentDone = SUCCEEDED(presentation->status);
+            }
+
+            //
+            // Post a message indicating that this presentation is done; ready for the next one
+            //
+            PresentDoneMessage::createAndPost(this, presentation);
+        }
+    }
+
+    void setScaleFactor(double scale_)
+    {
+        dpiScalingFactor = scale_;
+
+        updateDeviceContextDPI();
+    }
+
+    double getScaleFactor() const
+    {
+        return dpiScalingFactor;
+    }
+
+    HWND hwnd = nullptr;
+    SharedResourcePointer<Direct2DFactories> sharedFactories;
+    ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
+    ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
+
+    direct2d::UpdateRegion updateRegion;
+    bool resizing = false;
+
+private:
+    Direct2DLowLevelGraphicsContext& owner;
+    DXGI_SWAP_EFFECT const swapEffect;
+    UINT const bufferCount;
+    DXGI_SCALING const dxgiScaling;
+    double dpiScalingFactor = 1.0;
+    juce::Rectangle<int> bufferBounds{ 1, 1 };
+    uint32 const swapChainFlags;
+    uint32 const presentSyncInterval;
+    uint32 const presentFlags;
+    ComSmartPtr<ID2D1DeviceContext> commandListDeviceContext;
+    ComSmartPtr<ID2D1DeviceContext> threadDeviceContext;
+    ComSmartPtr<IDXGISwapChain1> swapChain;
+    ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
     ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
+    ComSmartPtr<IDCompositionDevice> compositionDevice;
+    ComSmartPtr<IDCompositionTarget> compositionTarget;
+    ComSmartPtr<IDCompositionVisual> compositionVisual;
+
+    struct Presentation
+    {
+        HRESULT status = S_OK;
+
+        ComSmartPtr<ID2D1CommandList> commandList;
+        
+        RectangleList<int> paintAreas;
+        Rectangle<int> bufferBounds;
+        Array<RECT> dirtyRectangles;
+        
+        enum State
+        {
+            clear,
+            painting,
+            painted
+        } state = clear;
+
+        int frameNumber = -1;
+
+        void reset()
+        {
+            state = clear;
+            paintAreas.clear();
+            dirtyRectangles.clearQuick();
+            commandList = nullptr;
+        }
+
+    } presentations[2];
+    int presentationIndex = 0;
+    std::atomic<Presentation*> paintedPresentation = nullptr;
+
+    struct PresentDoneMessage : public CallbackMessage
+    {
+        PresentDoneMessage(Pimpl* that_, Presentation* presentation_) :
+            that(that_),
+            presentation(presentation_)
+        {
+        }
+        ~PresentDoneMessage() override = default;
+
+        void messageCallback() override
+        {
+            //
+            // Back on the message thread
+            //
+            if (that)
+            {
+                if (presentation)
+                {
+                    //
+                    // Release the device context if Present1 returned an error
+                    //
+                    auto status = presentation->status;
+                    if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
+                    {
+                        that->releaseDeviceContext();
+                    }
+
+                    presentation->reset();
+                }
+
+                if (that->owner.onPaintReady)
+                {
+                    that->owner.onPaintReady();
+                }
+            }
+        }
+
+        static void createAndPost(Pimpl* that_, Presentation* presentation_)
+        {
+            (new PresentDoneMessage{ that_, presentation_ })->post();
+        }
+
+        WeakReference<Pimpl> that;
+        Presentation* presentation;
+    };
+
+    void createDeviceContext()
+    {
+        if (d2dDedicatedFactory != nullptr)
+        {
+            if (commandListDeviceContext == nullptr || threadDeviceContext == nullptr)
+            {
+                // This flag adds support for surfaces with a different color channel ordering
+                // than the API default. It is required for compatibility with Direct2D.
+                UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if JUCE_DEBUG
+                creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+                ComSmartPtr<ID3D11Device> direct3DDevice;
+                auto hr = D3D11CreateDevice(nullptr,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    nullptr,
+                    creationFlags,
+                    nullptr, 0,
+                    D3D11_SDK_VERSION,
+                    direct3DDevice.resetAndGetPointerAddress(),
+                    nullptr,
+                    nullptr);
+                if (SUCCEEDED(hr))
+                {
+                    ComSmartPtr<IDXGIDevice> dxgiDevice;
+                    hr = direct3DDevice->QueryInterface(dxgiDevice.resetAndGetPointerAddress());
+                    if (SUCCEEDED(hr))
+                    {
+                        ComSmartPtr<IDXGIAdapter> dxgiAdapter;
+                        hr = dxgiDevice->GetAdapter(dxgiAdapter.resetAndGetPointerAddress());
+                        if (SUCCEEDED(hr))
+                        {
+                            ComSmartPtr<IDXGIFactory2> dxgiFactory;
+                            hr = dxgiAdapter->GetParent(__uuidof(dxgiFactory), reinterpret_cast<void**>(dxgiFactory.resetAndGetPointerAddress()));
+                            if (SUCCEEDED(hr))
+                            {
+                                DXGI_SWAP_CHAIN_DESC1 swapChainDescription = {};
+                                swapChainDescription.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                                swapChainDescription.Width = bufferBounds.getWidth();
+                                swapChainDescription.Height = bufferBounds.getHeight();
+                                swapChainDescription.SampleDesc.Count = 1;
+                                swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+                                swapChainDescription.BufferCount = bufferCount;
+                                swapChainDescription.SwapEffect = swapEffect;
+                                swapChainDescription.Scaling = dxgiScaling;
+                                swapChainDescription.Flags = swapChainFlags;
+
+                                hr = dxgiFactory->CreateSwapChainForComposition(direct3DDevice,
+                                    &swapChainDescription,
+                                    nullptr,
+                                    swapChain.resetAndGetPointerAddress());
+
+                                if (SUCCEEDED(hr))
+                                {
+                                    ComSmartPtr<ID2D1Device> direct2DDevice;
+                                    hr = d2dDedicatedFactory->CreateDevice(dxgiDevice, direct2DDevice.resetAndGetPointerAddress());
+                                    if (SUCCEEDED(hr))
+                                    {
+                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, threadDeviceContext.resetAndGetPointerAddress());
+                                        if (SUCCEEDED(hr))
+                                        {
+                                            threadDeviceContext->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+
+                                            updateDeviceContextDPI();
+                                        }
+
+                                        hr = direct2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, commandListDeviceContext.resetAndGetPointerAddress());
+                                    }
+                                }
+
+                                if (SUCCEEDED(hr))
+                                {
+                                    hr = DCompositionCreateDevice(dxgiDevice, __uuidof(IDCompositionDevice), reinterpret_cast<void**>(compositionDevice.resetAndGetPointerAddress()));
+                                    if (SUCCEEDED(hr))
+                                    {
+                                        hr = compositionDevice->CreateTargetForHwnd(hwnd, FALSE, compositionTarget.resetAndGetPointerAddress());
+                                        if (SUCCEEDED(hr))
+                                        {
+                                            hr = compositionDevice->CreateVisual(compositionVisual.resetAndGetPointerAddress());
+                                            if (SUCCEEDED(hr))
+                                            {
+                                                hr = compositionTarget->SetRoot(compositionVisual);
+                                                if (SUCCEEDED(hr))
+                                                {
+                                                    hr = compositionVisual->SetContent(swapChain);
+                                                    if (SUCCEEDED(hr))
+                                                    {
+                                                        hr = compositionDevice->Commit();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                jassert(SUCCEEDED(hr));
+            }
+
+            if (colourBrush == nullptr && commandListDeviceContext != nullptr)
+            {
+                auto hr = commandListDeviceContext->CreateSolidColorBrush(D2D1::ColorF::ColorF(0.0f, 0.0f, 0.0f, 1.0f), colourBrush.resetAndGetPointerAddress());
+                jassertquiet(SUCCEEDED(hr));
+            }
+        }
+    }
+
+    void releaseDeviceContext()
+    {
+        colourBrush = nullptr;
+        swapChainBuffer = nullptr;
+        swapChain = nullptr;
+        commandListDeviceContext = nullptr;
+        threadDeviceContext = nullptr;
+        for (auto& presentation : presentations)
+        {
+            presentation.reset();
+        }
+    }
+
+    void createSwapChainBuffer()
+    {
+        if (threadDeviceContext != nullptr && swapChain != nullptr && swapChainBuffer == nullptr)
+        {
+            ComSmartPtr<IDXGISurface> surface;
+            auto hr = swapChain->GetBuffer(0, __uuidof(surface), reinterpret_cast<void**>(surface.resetAndGetPointerAddress()));
+            if (SUCCEEDED(hr))
+            {
+                D2D1_BITMAP_PROPERTIES1 bitmapProperties = {};
+                bitmapProperties.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+                bitmapProperties.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                bitmapProperties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+                hr = threadDeviceContext->CreateBitmapFromDxgiSurface(surface, bitmapProperties, swapChainBuffer.resetAndGetPointerAddress());
+                jassert(SUCCEEDED(hr));
+            }
+        }
+    }
+
+    void updateDeviceContextDPI()
+    {
+        if (threadDeviceContext)
+        {
+            float windowsDefaultDPI = 96.0f;
+            float scaledDPI = windowsDefaultDPI * (float)dpiScalingFactor;
+            threadDeviceContext->SetDpi(scaledDPI, scaledDPI);
+        }
+    }
+
+    JUCE_DECLARE_WEAK_REFERENCEABLE(Pimpl)
 };
 
 //==============================================================================
@@ -159,188 +940,76 @@ public:
             // bottleneck.. Can the same internal objects be shared by multiple state objects, maybe using copy-on-write?
             setFill (owner.currentState->fillType);
             currentBrush = owner.currentState->currentBrush;
-            clipRect = owner.currentState->clipRect;
-            transform = owner.currentState->transform;
+            clipRegion = owner.currentState->clipRegion;
+            currentTransform = owner.currentState->currentTransform;
 
             font = owner.currentState->font;
             currentFontFace = owner.currentState->currentFontFace;
+
+            interpolationMode = owner.currentState->interpolationMode;
         }
         else
         {
-            const auto size = owner.pimpl->renderingTarget->GetPixelSize();
-            clipRect.setSize (size.width, size.height);
-            setFill (FillType (Colours::black));
+            if (auto deviceContext = owner.pimpl->getDeviceContext())
+            {
+                clipRegion = owner.pimpl->getBufferBounds();
+            }
+            setFill(FillType(Colours::black));
         }
     }
 
     ~SavedState()
     {
-        clearClip();
+        popLayers();
         clearFont();
         clearFill();
-        clearPathClip();
-        clearImageClip();
-        complexClipLayer = nullptr;
-        bitmapMaskLayer = nullptr;
     }
 
-    void clearClip()
+    void pushLayer(const D2D1_LAYER_PARAMETERS& layerParameters)
     {
-        popClips();
-        shouldClipRect = false;
-    }
-
-    void clipToRectangle (const Rectangle<int>& r)
-    {
-        clearClip();
-        clipRect = r.toFloat().transformedBy (transform).getSmallestIntegerContainer();
-        shouldClipRect = true;
-        pushClips();
-    }
-
-    void clearPathClip()
-    {
-        popClips();
-
-        if (shouldClipComplex)
+        if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
-            complexClipGeometry = nullptr;
-            shouldClipComplex = false;
+	        //
+	        // Clipping and transparency are all handled by pushing Direct2D layers. The SavedState creates an internal stack
+	        // of Layer objects to keep track of how many layers need to be popped.
+	        // 
+	        // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
+	        //
+	        deviceContext->PushLayer(layerParameters, nullptr);
+	
+	        pushedLayers.add(new Layer{ deviceContext });
         }
     }
 
-    void Direct2DLowLevelGraphicsContext::SavedState::clipToPath (ID2D1Geometry* geometry)
+    void pushGeometryClipLayer(ComSmartPtr<ID2D1Geometry> geometry)
     {
-        clearPathClip();
-
-        if (complexClipLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (complexClipLayer.resetAndGetPointerAddress());
-
-        complexClipGeometry = geometry;
-        shouldClipComplex = true;
-        pushClips();
-    }
-
-    void clearRectListClip()
-    {
-        popClips();
-
-        if (shouldClipRectList)
+        if (geometry != nullptr)
         {
-            rectListGeometry = nullptr;
-            shouldClipRectList = false;
+            pushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), geometry));
         }
     }
 
-    void clipToRectList (ID2D1Geometry* geometry)
+    void pushAxisAlignedClipLayer(Rectangle<int> r)
     {
-        clearRectListClip();
-
-        if (rectListLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (rectListLayer.resetAndGetPointerAddress());
-
-        rectListGeometry = geometry;
-        shouldClipRectList = true;
-        pushClips();
-    }
-
-    void clearImageClip()
-    {
-        popClips();
-
-        if (shouldClipBitmap)
+        if (auto deviceContext = owner.pimpl->getDeviceContext())
         {
-            maskBitmap = nullptr;
-            bitmapMaskBrush = nullptr;
-            shouldClipBitmap = false;
+            deviceContext->PushAxisAlignedClip(direct2d::rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+            pushedLayers.add(new AxisAlignedClipLayer{ deviceContext });
         }
     }
 
-    void clipToImage (const Image& clipImage, const AffineTransform& clipTransform)
+    void popLayers()
     {
-        clearImageClip();
-
-        if (bitmapMaskLayer == nullptr)
-            owner.pimpl->renderingTarget->CreateLayer (bitmapMaskLayer.resetAndGetPointerAddress());
-
-        D2D1_BRUSH_PROPERTIES brushProps = { 1, transformToMatrix (clipTransform) };
-        auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
-        D2D1_SIZE_U size = { (UINT32) clipImage.getWidth(), (UINT32) clipImage.getHeight() };
-        auto bp = D2D1::BitmapProperties();
-
-        maskImage = clipImage.convertedToFormat (Image::ARGB);
-        Image::BitmapData bd (maskImage, Image::BitmapData::readOnly); // xxx should be maskImage?
-        bp.pixelFormat = owner.pimpl->renderingTarget->GetPixelFormat();
-        bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-
-        auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, maskBitmap.resetAndGetPointerAddress());
-        hr = owner.pimpl->renderingTarget->CreateBitmapBrush (maskBitmap, bmProps, brushProps, bitmapMaskBrush.resetAndGetPointerAddress());
-
-        imageMaskLayerParams = D2D1::LayerParameters();
-        imageMaskLayerParams.opacityBrush = bitmapMaskBrush;
-
-        shouldClipBitmap = true;
-        pushClips();
-    }
-
-    void popClips()
-    {
-        if (clipsBitmap)
+        //
+        // Pop each layer in reverse order
+        //
+        for (int index = pushedLayers.size() - 1; index >= 0; --index)
         {
-            owner.pimpl->renderingTarget->PopLayer();
-            clipsBitmap = false;
+            pushedLayers[index]->pop();
         }
 
-        if (clipsComplex)
-        {
-            owner.pimpl->renderingTarget->PopLayer();
-            clipsComplex = false;
-        }
-
-        if (clipsRectList)
-        {
-            owner.pimpl->renderingTarget->PopLayer();
-            clipsRectList = false;
-        }
-
-        if (clipsRect)
-        {
-            owner.pimpl->renderingTarget->PopAxisAlignedClip();
-            clipsRect = false;
-        }
-    }
-
-    void pushClips()
-    {
-        if (shouldClipRect && !clipsRect)
-        {
-            owner.pimpl->renderingTarget->PushAxisAlignedClip (rectangleToRectF (clipRect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            clipsRect = true;
-        }
-
-        if (shouldClipRectList && !clipsRectList)
-        {
-            auto layerParams = D2D1::LayerParameters();
-            rectListGeometry->GetBounds (D2D1::IdentityMatrix(), &layerParams.contentBounds);
-            layerParams.geometricMask = rectListGeometry;
-            owner.pimpl->renderingTarget->PushLayer (layerParams, rectListLayer);
-            clipsRectList = true;
-        }
-
-        if (shouldClipComplex && !clipsComplex)
-        {
-            auto layerParams = D2D1::LayerParameters();
-            complexClipGeometry->GetBounds (D2D1::IdentityMatrix(), &layerParams.contentBounds);
-            layerParams.geometricMask = complexClipGeometry;
-            owner.pimpl->renderingTarget->PushLayer (layerParams, complexClipLayer);
-            clipsComplex = true;
-        }
-
-        if (shouldClipBitmap && !clipsBitmap)
-        {
-            owner.pimpl->renderingTarget->PushLayer (imageMaskLayerParams, bitmapMaskLayer);
-            clipsBitmap = true;
-        }
+        pushedLayers.clear(true /* deleteObjects */);
     }
 
     void setFill (const FillType& newFillType)
@@ -354,7 +1023,7 @@ public:
 
     void clearFont()
     {
-        currentFontFace = localFontFace = nullptr;
+        currentFontFace = nullptr;
     }
 
     void setFont (const Font& newFont)
@@ -370,19 +1039,23 @@ public:
     {
         if (currentFontFace == nullptr)
         {
-            auto typefacePtr = font.getTypefacePtr();
-            auto* typeface = dynamic_cast<WindowsDirectWriteTypeface*> (typefacePtr.get());
-            currentFontFace = typeface->getIDWriteFontFace();
-            fontHeightToEmSizeFactor = typeface->getUnitsToHeightScaleFactor();
+            auto typeface = font.getTypefacePtr();
+            auto directWriteTypeface = dynamic_cast<WindowsDirectWriteTypeface*> (typeface.get());
+            if (directWriteTypeface)
+            {
+                currentFontFace = directWriteTypeface->getIDWriteFontFace();
+                fontHeightToEmSizeFactor = directWriteTypeface->getUnitsToHeightScaleFactor();
+            }
         }
     }
 
     void setOpacity (float newOpacity)
     {
         fillType.setOpacity (newOpacity);
-
-        if (currentBrush != nullptr)
-            currentBrush->SetOpacity (newOpacity);
+        if (fillType.isColour())
+        {
+            updateColourBrush();
+        }
     }
 
     void clearFill()
@@ -390,80 +1063,81 @@ public:
         gradientStops = nullptr;
         linearGradient = nullptr;
         radialGradient = nullptr;
-        bitmap = nullptr;
         bitmapBrush = nullptr;
         currentBrush = nullptr;
     }
 
     void createBrush()
     {
-        if (currentBrush == nullptr)
+        auto deviceContext = owner.pimpl->getDeviceContext();
+        if (currentBrush == nullptr && deviceContext != nullptr)
         {
             if (fillType.isColour())
             {
-                auto colour = colourToD2D (fillType.colour);
-                owner.pimpl->colourBrush->SetColor (colour);
-                currentBrush = owner.pimpl->colourBrush;
+                updateColourBrush();
+
+                currentBrush = owner.pimpl->getColourBrush();
             }
             else if (fillType.isTiledImage())
             {
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform) };
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), direct2d::transformToMatrix (fillType.transform) };
                 auto bmProps = D2D1::BitmapBrushProperties (D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
 
-                image = fillType.image;
+                auto image = fillType.image;
 
                 D2D1_SIZE_U size = { (UINT32) image.getWidth(), (UINT32) image.getHeight() };
                 auto bp = D2D1::BitmapProperties();
 
-                this->image = image.convertedToFormat (Image::ARGB);
-                Image::BitmapData bd (this->image, Image::BitmapData::readOnly);
-                bp.pixelFormat = owner.pimpl->renderingTarget->GetPixelFormat();
+                image = image.convertedToFormat (Image::ARGB);
+                Image::BitmapData bd (image, Image::BitmapData::readOnly);
+                bp.pixelFormat = deviceContext->GetPixelFormat();
                 bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
-                auto hr = owner.pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
-                hr = owner.pimpl->renderingTarget->CreateBitmapBrush (bitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
-
-                currentBrush = bitmapBrush;
+                ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
+                auto hr = deviceContext->CreateBitmap (size, bd.data, bd.lineStride, bp, tiledImageBitmap.resetAndGetPointerAddress());
+                jassert(SUCCEEDED(hr));
+                if (SUCCEEDED(hr))
+                {
+                    hr = deviceContext->CreateBitmapBrush(tiledImageBitmap, bmProps, brushProps, bitmapBrush.resetAndGetPointerAddress());
+                    jassert(SUCCEEDED(hr));
+                    if (SUCCEEDED(hr))
+                    {
+                        currentBrush = bitmapBrush;
+                    }
+                }
             }
             else if (fillType.isGradient())
             {
-                gradientStops = nullptr;
-
-                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), transformToMatrix (fillType.transform.followedBy (transform)) };
-
+                D2D1_BRUSH_PROPERTIES brushProps = { fillType.getOpacity(), direct2d::transformToMatrix(fillType.transform) };
                 const int numColors = fillType.gradient->getNumColours();
 
                 HeapBlock<D2D1_GRADIENT_STOP> stops (numColors);
 
                 for (int i = fillType.gradient->getNumColours(); --i >= 0;)
                 {
-                    stops[i].color = colourToD2D (fillType.gradient->getColour (i));
+                    stops[i].color = direct2d::colourToD2D (fillType.gradient->getColour (i));
                     stops[i].position = (FLOAT) fillType.gradient->getColourPosition (i);
                 }
 
-                owner.pimpl->renderingTarget->CreateGradientStopCollection (stops.getData(), numColors, gradientStops.resetAndGetPointerAddress());
+                deviceContext->CreateGradientStopCollection (stops.getData(), numColors, gradientStops.resetAndGetPointerAddress());
 
                 if (fillType.gradient->isRadial)
                 {
-                    radialGradient = nullptr;
-
                     const auto p1 = fillType.gradient->point1;
                     const auto p2 = fillType.gradient->point2;
                     const auto r = p1.getDistanceFrom(p2);
                     const auto props = D2D1::RadialGradientBrushProperties ({ p1.x, p1.y }, {}, r, r);
 
-                    owner.pimpl->renderingTarget->CreateRadialGradientBrush (props, brushProps, gradientStops, radialGradient.resetAndGetPointerAddress());
+                    deviceContext->CreateRadialGradientBrush (props, brushProps, gradientStops, radialGradient.resetAndGetPointerAddress());
                     currentBrush = radialGradient;
                 }
                 else
                 {
-                    linearGradient = 0;
-
                     const auto p1 = fillType.gradient->point1;
                     const auto p2 = fillType.gradient->point2;
                     const auto props = D2D1::LinearGradientBrushProperties ({ p1.x, p1.y }, { p2.x, p2.y });
 
-                    owner.pimpl->renderingTarget->CreateLinearGradientBrush (props, brushProps, gradientStops, linearGradient.resetAndGetPointerAddress());
+                    deviceContext->CreateLinearGradientBrush (props, brushProps, gradientStops, linearGradient.resetAndGetPointerAddress());
 
                     currentBrush = linearGradient;
                 }
@@ -471,38 +1145,75 @@ public:
         }
     }
 
+    void beginTransparency(float opacity)
+    {
+        pushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(),
+            nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            D2D1::IdentityMatrix(),
+            opacity));
+    }
+
+    void updateColourBrush()
+    {
+        if (auto colourBrush = owner.pimpl->getColourBrush())
+        {
+            auto colour = direct2d::colourToD2D(fillType.colour);
+            colourBrush->SetColor(colour);
+
+            colourBrush->SetOpacity(fillType.getOpacity());
+        }
+    }
+
+    //
+    // Layer struct to keep track of pushed Direct2D layers.
+    // 
+    // Most layers need to be popped by calling PopLayer, unless it's an axis aligned clip layer
+    //
+    struct Layer
+    {
+        Layer(ID2D1DeviceContext* deviceContext_) :
+            deviceContext(deviceContext_)
+        {
+            jassert(deviceContext_ != nullptr);
+        }
+        virtual ~Layer() = default;
+
+        virtual void pop()
+        {
+            deviceContext->PopLayer();
+        }
+
+        ID2D1DeviceContext* deviceContext;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Layer)
+    };
+
+    struct AxisAlignedClipLayer : public Layer
+    {
+        AxisAlignedClipLayer(ID2D1DeviceContext* deviceContext_) :
+            Layer(deviceContext_)
+        {
+        }
+        ~AxisAlignedClipLayer() override = default;
+
+        void pop() override
+        {
+            deviceContext->PopAxisAlignedClip();
+        }
+    };
+
     Direct2DLowLevelGraphicsContext& owner;
 
-    AffineTransform transform;
+    RenderingHelpers::TranslationOrTransform currentTransform;
+    Rectangle<int> clipRegion;
 
     Font font;
     float fontHeightToEmSizeFactor = 1.0f;
 
     IDWriteFontFace* currentFontFace = nullptr;
-    ComSmartPtr<IDWriteFontFace> localFontFace;
 
-    Rectangle<int> clipRect;
-    bool clipsRect = false, shouldClipRect = false;
-
-    Image image;
-    ComSmartPtr<ID2D1Bitmap> bitmap; // xxx needs a better name - what is this for??
-    bool clipsBitmap = false, shouldClipBitmap = false;
-
-    ComSmartPtr<ID2D1Geometry> complexClipGeometry;
-    D2D1_LAYER_PARAMETERS complexClipLayerParams;
-    ComSmartPtr<ID2D1Layer> complexClipLayer;
-    bool clipsComplex = false, shouldClipComplex = false;
-
-    ComSmartPtr<ID2D1Geometry> rectListGeometry;
-    D2D1_LAYER_PARAMETERS rectListLayerParams;
-    ComSmartPtr<ID2D1Layer> rectListLayer;
-    bool clipsRectList = false, shouldClipRectList = false;
-
-    Image maskImage;
-    D2D1_LAYER_PARAMETERS imageMaskLayerParams;
-    ComSmartPtr<ID2D1Layer> bitmapMaskLayer;
-    ComSmartPtr<ID2D1Bitmap> maskBitmap;
-    ComSmartPtr<ID2D1BitmapBrush> bitmapMaskBrush;
+    OwnedArray<Layer> pushedLayers;
 
     ID2D1Brush* currentBrush = nullptr;
     ComSmartPtr<ID2D1BitmapBrush> bitmapBrush;
@@ -512,26 +1223,17 @@ public:
 
     FillType fillType;
 
+    D2D1_INTERPOLATION_MODE interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SavedState)
 };
 
 //==============================================================================
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_)
-    : hwnd (hwnd_),
-      currentState (nullptr),
-      pimpl (new Pimpl())
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_)
+    : currentState(nullptr),
+    pimpl(new Pimpl(*this, hwnd_, direct2d::isTearingSupported()))
 {
-    RECT windowRect;
-    GetClientRect (hwnd, &windowRect);
-    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
-    bounds.setSize (size.width, size.height);
-
-    if (pimpl->factories->d2dFactory != nullptr)
-    {
-        [[maybe_unused]] auto hr = pimpl->factories->d2dFactory->CreateHwndRenderTarget ({}, { hwnd, size }, pimpl->renderingTarget.resetAndGetPointerAddress());
-        jassert (SUCCEEDED (hr));
-        hr = pimpl->renderingTarget->CreateSolidColorBrush (D2D1::ColorF::ColorF (0.0f, 0.0f, 0.0f, 1.0f), pimpl->colourBrush.resetAndGetPointerAddress());
-    }
+    resize();
 }
 
 Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
@@ -539,91 +1241,224 @@ Direct2DLowLevelGraphicsContext::~Direct2DLowLevelGraphicsContext()
     states.clear();
 }
 
-void Direct2DLowLevelGraphicsContext::resized()
+void Direct2DLowLevelGraphicsContext::startResizing()
 {
-    RECT windowRect;
-    GetClientRect (hwnd, &windowRect);
-    D2D1_SIZE_U size = { (UINT32) (windowRect.right - windowRect.left), (UINT32) (windowRect.bottom - windowRect.top) };
-
-    pimpl->renderingTarget->Resize (size);
-    bounds.setSize (size.width, size.height);
+    pimpl->resizing = true;
 }
 
-void Direct2DLowLevelGraphicsContext::clear()
+void Direct2DLowLevelGraphicsContext::resize()
 {
-    pimpl->renderingTarget->Clear (D2D1::ColorF (D2D1::ColorF::White, 0.0f)); // xxx why white and not black?
+    pimpl->resize();
 }
 
-void Direct2DLowLevelGraphicsContext::start()
+void Direct2DLowLevelGraphicsContext::finishResizing()
 {
-    pimpl->renderingTarget->BeginDraw();
-    saveState();
+    pimpl->resizing = false;
+    pimpl->clearDeferredRepaints();
 }
 
-void Direct2DLowLevelGraphicsContext::end()
+void Direct2DLowLevelGraphicsContext::addDeferredRepaint(Rectangle<int> deferredRepaint)
 {
-    states.clear();
+    //DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
+    pimpl->addDeferredRepaint(deferredRepaint);
+
+    triggerAsyncUpdate();
+}
+
+bool Direct2DLowLevelGraphicsContext::needsRepaint()
+{
+    return pimpl->needsRepaint();
+}
+
+bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
+{
+    if (pimpl->resizing)
+    {
+        return false;
+    }
+
+    Rectangle<int> initialClipBounds;
+    if (pimpl->startRenderAsync(frameNumber, initialClipBounds))
+    {
+        saveState();
+
+        if (initialClipBounds.isEmpty() == false)
+        {
+            clipToRectangle(initialClipBounds);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+void Direct2DLowLevelGraphicsContext::endAsync()
+{
+    while (states.size() > 0)
+    {
+        states.removeLast(1);
+    }
     currentState = nullptr;
-    pimpl->renderingTarget->EndDraw();
-    pimpl->renderingTarget->CheckWindowState();
+
+    pimpl->finishRenderAsync();
+
+    pimpl->updateRegion.clear();
+}
+
+void Direct2DLowLevelGraphicsContext::startSync()
+{
+    Rectangle<int> initialClipBounds;
+
+    pimpl->startRenderSync(initialClipBounds);
+    saveState();
+
+    if (initialClipBounds.isEmpty() == false)
+    {
+        clipToRectangle(initialClipBounds);
+    }
+}
+
+void Direct2DLowLevelGraphicsContext::endSync()
+{
+    while (states.size() > 0)
+    {
+        states.removeLast(1);
+    }
+    currentState = nullptr;
+
+    pimpl->finishRenderSync();
+
+    pimpl->updateRegion.clear();
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
 {
-    addTransform (AffineTransform::translation ((float) o.x, (float) o.y));
+    currentState->currentTransform.setOrigin(o);
 }
 
 void Direct2DLowLevelGraphicsContext::addTransform (const AffineTransform& transform)
 {
-    currentState->transform = transform.followedBy (currentState->transform);
+    currentState->currentTransform.addTransform(transform);
 }
 
 float Direct2DLowLevelGraphicsContext::getPhysicalPixelScaleFactor()
 {
-    return std::sqrt (std::abs (currentState->transform.getDeterminant()));
+    return currentState->currentTransform.getPhysicalPixelScaleFactor();
 }
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
-    currentState->clipToRectangle (r);
+    //
+    // Update the current clip region (only used for getClipBounds)
+    //
+    auto currentTransform = currentState->currentTransform.getTransform();
+    auto transformedR = r.transformedBy(currentTransform);
+    transformedR.intersectRectangle(currentState->clipRegion);
+
+    //
+    // Push a clip layer
+    //
+    if (direct2d::isTransformOnlyTranslationOrScale(currentTransform))
+    {
+        //
+        // If the clip rectangle will still be a rectangle with vertical and horizontal sides after transformation, then use an axis-aligned clip layer
+        //
+        currentState->pushAxisAlignedClipLayer(transformedR);
+    }
+    else
+    {
+        //
+        // If the current transform is nontrivial (shear, rotation, etc), then use a transformed geometry for the clip layer
+        //
+        currentState->pushGeometryClipLayer(pimpl->rectToPathGeometry(r, currentTransform, D2D1_FILL_MODE_WINDING));
+    }
+
     return ! isClipEmpty();
 }
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
-    currentState->clipToRectList (pimpl->rectListToPathGeometry (clipRegion));
+    //
+    // Update the current clip region (only used for getClipBounds)
+    //
+    auto const currentTransform = currentState->currentTransform.getTransform();
+    auto transformedR = clipRegion.getBounds().transformedBy(currentTransform);
+    transformedR.intersectRectangle(currentState->clipRegion);
+
+    currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(clipRegion, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_WINDING));
+
     return ! isClipEmpty();
 }
 
-void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>&)
+void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>& r)
 {
-    //xxx
+    //
+    // To exclude the rectangle r, build a rectangle list with r as the first rectangle and the render target bounds as the second.
+    // 
+    // Then, convert that rectangle list to a geometry, but specify D2D1_FILL_MODE_ALTERNATE so the inside of r is *outside*
+    // the geometry and everything else on the screen is inside the geometry.
+    // 
+    // Have to use addWithoutMerging to build the rectangle list to keep the rectangles separate.
+    //
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        RectangleList<int> rectangles{ r };
+        rectangles.addWithoutMerging(pimpl->getBufferBounds());
+
+        currentState->pushGeometryClipLayer(pimpl->rectListToPathGeometry(rectangles, currentState->currentTransform.getTransform(), D2D1_FILL_MODE_ALTERNATE));
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
-    currentState->clipToPath (pimpl->pathToPathGeometry (path, transform));
+    currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, currentState->currentTransform.getTransformWith(transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
-    currentState->clipToImage (sourceImage, transform);
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        auto chainedTransform = currentState->currentTransform.getTransformWith(transform);
+        auto transformedR = sourceImage.getBounds().transformedBy(chainedTransform);
+        transformedR.intersectRectangle(currentState->clipRegion);
+
+        auto maskImage = sourceImage.convertedToFormat(Image::ARGB);
+
+        ComSmartPtr<ID2D1Bitmap> bitmap;
+        ComSmartPtr<ID2D1BitmapBrush> brush;
+
+        D2D1_BRUSH_PROPERTIES brushProps = { 1, direct2d::transformToMatrix(chainedTransform) };
+        auto bmProps = D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
+        auto bp = D2D1::BitmapProperties();
+
+        Image::BitmapData bd{ maskImage, Image::BitmapData::readOnly };
+        bp.pixelFormat = deviceContext->GetPixelFormat();
+        bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+
+        auto hr = deviceContext->CreateBitmap(D2D1_SIZE_U{ (UINT32)maskImage.getWidth(), (UINT32)maskImage.getHeight() }, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
+        hr = deviceContext->CreateBitmapBrush(bitmap, bmProps, brushProps, brush.resetAndGetPointerAddress());
+
+        auto layerParams = D2D1::LayerParameters();
+        layerParams.opacityBrush = brush;
+
+        currentState->pushLayer(layerParams);
+    }
 }
 
 bool Direct2DLowLevelGraphicsContext::clipRegionIntersects (const Rectangle<int>& r)
 {
-    return currentState->clipRect.intersects (r.toFloat().transformedBy (currentState->transform).getSmallestIntegerContainer());
+    return getClipBounds().intersects(r);
 }
 
 Rectangle<int> Direct2DLowLevelGraphicsContext::getClipBounds() const
 {
-    // xxx could this take into account complex clip regions?
-    return currentState->clipRect.toFloat().transformedBy (currentState->transform.inverted()).getSmallestIntegerContainer();
+    return currentState->currentTransform.deviceSpaceToUserSpace(currentState->clipRegion);
 }
 
 bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
 {
-    return currentState->clipRect.isEmpty();
+    return getClipBounds().isEmpty();
 }
 
 void Direct2DLowLevelGraphicsContext::saveState()
@@ -637,16 +1472,23 @@ void Direct2DLowLevelGraphicsContext::restoreState()
     jassert (states.size() > 1); //you should never pop the last state!
     states.removeLast (1);
     currentState = states.getLast();
+
+    //
+    // The solid color brush is shared between states, so restore the previous solid color and opacity
+    //
+    currentState->updateColourBrush();
 }
 
-void Direct2DLowLevelGraphicsContext::beginTransparencyLayer (float /*opacity*/)
+void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
 {
-    jassertfalse; //xxx todo
+    currentState->beginTransparency(opacity);
 }
 
 void Direct2DLowLevelGraphicsContext::endTransparencyLayer()
 {
-    jassertfalse; //xxx todo
+    //
+    // Do nothing; the Direct2D transparency layer will be popped along with the current saved state
+    //
 }
 
 void Direct2DLowLevelGraphicsContext::setFill (const FillType& fillType)
@@ -659,8 +1501,22 @@ void Direct2DLowLevelGraphicsContext::setOpacity (float newOpacity)
     currentState->setOpacity (newOpacity);
 }
 
-void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality /*quality*/)
+void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality quality)
 {
+    switch (quality)
+    {
+    case Graphics::ResamplingQuality::lowResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+        break;
+
+    case Graphics::ResamplingQuality::mediumResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+        break;
+
+    case Graphics::ResamplingQuality::highResamplingQuality:
+        currentState->interpolationMode = D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC;
+        break;
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*replaceExistingContents*/)
@@ -670,10 +1526,13 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
-    currentState->createBrush();
-    pimpl->renderingTarget->FillRectangle (rectangleToRectF (r), currentState->currentBrush);
-    pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->FillRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& list)
@@ -682,47 +1541,158 @@ void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& 
         fillRect (r);
 }
 
+bool Direct2DLowLevelGraphicsContext::drawRect(const Rectangle<float>& r, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        deviceContext->DrawRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush, lineThickness);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
 void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTransform& transform)
 {
-    currentState->createBrush();
-    ComSmartPtr<ID2D1Geometry> geometry (pimpl->pathToPathGeometry (p, transform.followedBy (currentState->transform)));
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        if (auto geometry = pimpl->pathToPathGeometry(p, transform))
+        {
+            deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+            deviceContext->FillGeometry(geometry, currentState->currentBrush);
+            deviceContext->SetTransform(D2D1::IdentityMatrix());
+        }
+    }
+}
 
-    if (pimpl->renderingTarget != nullptr)
-        pimpl->renderingTarget->FillGeometry (geometry, currentState->currentBrush);
+bool Direct2DLowLevelGraphicsContext::drawPath(const Path& p, const PathStrokeType& strokeType, const AffineTransform& transform)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        if (auto geometry = pimpl->pathToPathGeometry(p, transform))
+        {
+            // JUCE JointStyle   ID2D1StrokeStyle 
+            // ---------------   ----------------
+            // mitered           D2D1_LINE_JOIN_MITER
+            // curved            D2D1_LINE_JOIN_ROUND
+            // beveled           D2D1_LINE_JOIN_BEVEL
+            //
+            // JUCE EndCapStyle  ID2D1StrokeStyle 
+            // ----------------  ----------------
+            // butt              D2D1_CAP_STYLE_FLAT
+            // square            D2D1_CAP_STYLE_SQUARE 
+            // rounded           D2D1_CAP_STYLE_ROUND
+            //
+            auto lineJoin = D2D1_LINE_JOIN_MITER;
+            switch (strokeType.getJointStyle())
+            {
+            case PathStrokeType::JointStyle::mitered:
+                // already set
+                break;
+
+            case PathStrokeType::JointStyle::curved:
+                lineJoin = D2D1_LINE_JOIN_ROUND;
+                break;
+
+            case PathStrokeType::JointStyle::beveled:
+                lineJoin = D2D1_LINE_JOIN_BEVEL;
+                break;
+
+            default:
+                // invalid EndCapStyle
+                jassertfalse;
+                break;
+            }
+
+            auto capStyle = D2D1_CAP_STYLE_FLAT;
+            switch (strokeType.getEndStyle())
+            {
+            case PathStrokeType::EndCapStyle::butt:
+                // already set
+                break;
+
+            case PathStrokeType::EndCapStyle::square:
+                capStyle = D2D1_CAP_STYLE_SQUARE;
+                break;
+
+            case PathStrokeType::EndCapStyle::rounded:
+                capStyle = D2D1_CAP_STYLE_ROUND;
+                break;
+
+            default:
+                // invalid EndCapStyle
+                jassertfalse;
+                break;
+            }
+
+            D2D1_STROKE_STYLE_PROPERTIES strokeStyleProperties
+            {
+                capStyle, capStyle, capStyle,
+                lineJoin,
+                1.0f,
+                D2D1_DASH_STYLE_SOLID,
+                0.0f
+            };
+            pimpl->d2dDedicatedFactory->CreateStrokeStyle(strokeStyleProperties, // TODO reuse the stroke style
+                nullptr, 0,
+                pimpl->strokeStyle.resetAndGetPointerAddress());
+
+            deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+            deviceContext->DrawGeometry(geometry, currentState->currentBrush, strokeType.getStrokeThickness(), pimpl->strokeStyle);
+            deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (transform.followedBy (currentState->transform)));
-
-    D2D1_SIZE_U size = { (UINT32) image.getWidth(), (UINT32) image.getHeight() };
-    auto bp = D2D1::BitmapProperties();
-
-    Image img (image.convertedToFormat (Image::ARGB));
-    Image::BitmapData bd (img, Image::BitmapData::readOnly);
-    bp.pixelFormat = pimpl->renderingTarget->GetPixelFormat();
-    bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-
+    if (auto deviceContext = pimpl->getDeviceContext())
     {
-        ComSmartPtr<ID2D1Bitmap> tempBitmap;
-        pimpl->renderingTarget->CreateBitmap (size, bd.data, bd.lineStride, bp, tempBitmap.resetAndGetPointerAddress());
-        if (tempBitmap != nullptr)
-            pimpl->renderingTarget->DrawBitmap (tempBitmap);
-    }
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
 
-    pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
+        D2D1_SIZE_U size = { (UINT32)image.getWidth(), (UINT32)image.getHeight() };
+        auto bp = D2D1::BitmapProperties();
+
+        Image img(image.convertedToFormat(Image::ARGB));
+        Image::BitmapData bd(img, Image::BitmapData::readOnly);
+        bp.pixelFormat = deviceContext->GetPixelFormat();
+        bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+
+        {
+            ComSmartPtr<ID2D1Bitmap> tempBitmap;
+            deviceContext->CreateBitmap(size, bd.data, bd.lineStride, bp, tempBitmap.resetAndGetPointerAddress());
+            if (tempBitmap != nullptr)
+            {
+                deviceContext->DrawImage(tempBitmap, currentState->interpolationMode);
+            }
+        }
+
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
-    // xxx doesn't seem to be correctly aligned, may need nudging by 0.5 to match the software renderer's behaviour
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
-    currentState->createBrush();
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        currentState->createBrush();
 
-    pimpl->renderingTarget->DrawLine (D2D1::Point2F (line.getStartX(), line.getStartY()),
-                                      D2D1::Point2F (line.getEndX(), line.getEndY()),
-                                      currentState->currentBrush);
-    pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
+        deviceContext->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
+            D2D1::Point2F(line.getEndX(), line.getEndY()),
+            currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+    }
 }
 
 void Direct2DLowLevelGraphicsContext::setFont (const Font& newFont)
@@ -740,41 +1710,232 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
     currentState->createBrush();
     currentState->createFont();
 
-    auto hScale = currentState->font.getHorizontalScale();
+    jassert(currentState->currentFontFace);
 
-    pimpl->renderingTarget->SetTransform (transformToMatrix (AffineTransform::scale (hScale, 1.0f)
-                                                                             .followedBy (transform)
-                                                                             .followedBy (currentState->transform)));
+    auto deviceContext = pimpl->getDeviceContext();
+    if (currentState->currentFontFace != nullptr && deviceContext != nullptr)
+    {
+        auto hScale = currentState->font.getHorizontalScale();
+        auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
+        auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
+        deviceContext->SetTransform(direct2d::transformToMatrix(deviceContextTransform));
 
-    const auto glyphIndices = (UINT16) glyphNumber;
-    const auto glyphAdvances = 0.0f;
-    DWRITE_GLYPH_OFFSET offset = { 0.0f, 0.0f };
+        const auto glyphIndices = (UINT16)glyphNumber;
+        const auto glyphAdvances = 0.0f;
+        DWRITE_GLYPH_OFFSET offset = { 0.0f, 0.0f };
 
-    DWRITE_GLYPH_RUN glyphRun;
-    glyphRun.fontFace = currentState->currentFontFace;
-    glyphRun.fontEmSize = (FLOAT) (currentState->font.getHeight() * currentState->fontHeightToEmSizeFactor);
-    glyphRun.glyphCount = 1;
-    glyphRun.glyphIndices = &glyphIndices;
-    glyphRun.glyphAdvances = &glyphAdvances;
-    glyphRun.glyphOffsets = &offset;
-    glyphRun.isSideways = FALSE;
-    glyphRun.bidiLevel = 0;
+        DWRITE_GLYPH_RUN glyphRun;
+        glyphRun.fontFace = currentState->currentFontFace;
+        glyphRun.fontEmSize = (FLOAT)(currentState->font.getHeight() * currentState->fontHeightToEmSizeFactor);
+        glyphRun.glyphCount = 1;
+        glyphRun.glyphIndices = &glyphIndices;
+        glyphRun.glyphAdvances = &glyphAdvances;
+        glyphRun.glyphOffsets = &offset;
+        glyphRun.isSideways = FALSE;
+        glyphRun.bidiLevel = 0;
 
-    pimpl->renderingTarget->DrawGlyphRun ({}, &glyphRun, currentState->currentBrush);
-    pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
+        //
+        // The gradient brushes are position-dependent, so need to undo the device context transform
+        //
+        D2D1::Matrix3x2F brushTransform;
+        currentState->currentBrush->GetTransform(&brushTransform);
+        currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
+
+        deviceContext->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
+
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+        currentState->currentBrush->SetTransform(brushTransform);
+    }
 }
 
 bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& text, const Rectangle<float>& area)
 {
-    pimpl->renderingTarget->SetTransform (transformToMatrix (currentState->transform));
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
 
-    DirectWriteTypeLayout::drawToD2DContext (text, area,
-                                             *(pimpl->renderingTarget),
-                                             *(pimpl->factories->directWriteFactory),
-                                             *(pimpl->factories->systemFonts));
+        DirectWriteTypeLayout::drawToD2DContext(text, area,
+            *(deviceContext),
+            *(pimpl->sharedFactories->directWriteFactory),
+            *(pimpl->sharedFactories->systemFonts));
 
-    pimpl->renderingTarget->SetTransform (D2D1::IdentityMatrix());
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+    }
+
     return true;
+}
+
+void Direct2DLowLevelGraphicsContext::setScaleFactor(double scale_)
+{
+    pimpl->setScaleFactor(scale_);
+}
+
+double Direct2DLowLevelGraphicsContext::getScaleFactor() const
+{
+    return pimpl->getScaleFactor();
+}
+
+bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ROUNDED_RECT roundedRect
+        {
+            direct2d::rectangleToRectF(area),
+            cornerSize, cornerSize
+        };
+        deviceContext->DrawRoundedRectangle(roundedRect, currentState->currentBrush, lineThickness);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area, float cornerSize)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+        
+        D2D1_ROUNDED_RECT roundedRect
+        {
+            direct2d::rectangleToRectF(area),
+            cornerSize, cornerSize
+        };
+        deviceContext->FillRoundedRectangle(roundedRect, currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::drawEllipse(Rectangle<float> area, float lineThickness)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ELLIPSE ellipse
+        {
+            { area.getCentreX(), area.getCentreY() },
+            area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
+        };
+        deviceContext->DrawEllipse(ellipse, currentState->currentBrush, lineThickness, nullptr);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
+{
+    if (auto deviceContext = pimpl->getDeviceContext())
+    {
+        currentState->createBrush();
+        deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
+
+        D2D1_ELLIPSE ellipse
+        {
+            { area.getCentreX(), area.getCentreY() },
+            area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
+        };
+        deviceContext->FillEllipse(ellipse, currentState->currentBrush);
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+
+        return true;
+    }
+
+    return false;
+}
+
+void Direct2DLowLevelGraphicsContext::handleAsyncUpdate()
+{
+    if (onPaintReady && !pimpl->resizing)
+    {
+        onPaintReady();
+    }
+}
+
+#if 0 // JUCE_DEBUG
+void printTransform(StringRef name, AffineTransform const& transform)
+{
+    DBG(name << "  scale:" << transform.getScaleFactor() << "  translate:" << transform.getTranslationX() << " / " << transform.getTranslationY());
+}
+#endif
+
+void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform)
+{
+    currentState->createBrush();
+    currentState->createFont();
+
+    jassert(currentState->currentFontFace);
+
+#if 0
+    DBG("drawGlyphRun");
+
+    for (auto const& glyph : glyphRun)
+    {
+        DBG("glyph " << glyph.glyphIndex << " x:" << glyph.left << " / " << glyph.baselineY);
+    }
+#endif
+
+    auto deviceContext = pimpl->getDeviceContext();
+    if (currentState->currentFontFace != nullptr && deviceContext != nullptr && glyphRun.size() > 0)
+    {
+        auto hScale = currentState->font.getHorizontalScale();
+        auto inverseHScale = hScale > 0.0f ? 1.0f / hScale : 1.0f;
+
+        auto scaledTransform = AffineTransform::scale(hScale, 1.0f).followedBy(transform);
+        auto deviceContextTransform = scaledTransform.followedBy(currentState->currentTransform.getTransform());
+        deviceContext->SetTransform(direct2d::transformToMatrix(deviceContextTransform));
+
+        //printTransform("   deviceContextTransform ", deviceContextTransform);
+
+        HeapBlock<UINT16> glyphIndices{ glyphRun.size() };
+        HeapBlock<float> glyphAdvances{ glyphRun.size() };
+        HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets{ glyphRun.size() };
+
+        for (int i = 0; i < glyphRun.size(); ++i)
+        {
+            auto const& glyph = glyphRun[i];
+            glyphIndices[i] = (UINT16)glyph.glyphIndex;
+            glyphAdvances[i] = 0.0f;
+            glyphOffsets[i] = { glyph.left * inverseHScale, -glyph.baselineY }; // note the essential minus sign before the baselineY value; negatvie offset goes down, positive goes up (opposite from JUCE)
+        }
+
+        DWRITE_GLYPH_RUN directWriteGlyphRun;
+        directWriteGlyphRun.fontFace = currentState->currentFontFace;
+        directWriteGlyphRun.fontEmSize = (FLOAT)(currentState->font.getHeight() * currentState->fontHeightToEmSizeFactor);
+        directWriteGlyphRun.glyphCount = glyphRun.size();
+        directWriteGlyphRun.glyphIndices = glyphIndices.getData();
+        directWriteGlyphRun.glyphAdvances = glyphAdvances.getData();
+        directWriteGlyphRun.glyphOffsets = glyphOffsets.getData();
+        directWriteGlyphRun.isSideways = FALSE;
+        directWriteGlyphRun.bidiLevel = 0;
+
+        //
+        // The gradient brushes are position-dependent, so need to undo the device context transform
+        //
+        D2D1::Matrix3x2F brushTransform;
+        currentState->currentBrush->GetTransform(&brushTransform);
+        currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
+
+        deviceContext->DrawGlyphRun({}, &directWriteGlyphRun, currentState->currentBrush);
+
+        deviceContext->SetTransform(D2D1::IdentityMatrix());
+        currentState->currentBrush->SetTransform(brushTransform);
+    }
 }
 
 } // namespace juce

@@ -31,10 +31,10 @@ class HWND__; // Forward or never
 typedef HWND__* HWND;
 #endif
 
-class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext
+class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public AsyncUpdater
 {
 public:
-    Direct2DLowLevelGraphicsContext (HWND);
+    Direct2DLowLevelGraphicsContext(HWND);
     ~Direct2DLowLevelGraphicsContext();
 
     //==============================================================================
@@ -67,7 +67,9 @@ public:
     void fillRect (const Rectangle<int>&, bool replaceExistingContents) override;
     void fillRect (const Rectangle<float>&) override;
     void fillRectList (const RectangleList<float>&) override;
+    bool drawRect(const Rectangle<float>&, float) override;
     void fillPath (const Path&, const AffineTransform&) override;
+    bool drawPath(const Path&, const PathStrokeType& strokeType, const AffineTransform&) override;
     void drawImage (const Image& sourceImage, const AffineTransform&) override;
 
     //==============================================================================
@@ -75,27 +77,45 @@ public:
     void setFont (const Font&) override;
     const Font& getFont() override;
     void drawGlyph (int glyphNumber, const AffineTransform&) override;
-    bool drawTextLayout (const AttributedString&, const Rectangle<float>&) override;
+    bool supportsGlyphRun() override { return true; }
+    void drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform) override;
+    bool drawTextLayout(const AttributedString&, const Rectangle<float>&) override;
 
-    void resized();
-    void clear();
+    void startResizing();
+    void resize();
+    void finishResizing();
 
-    void start();
-    void end();
+    void addDeferredRepaint(Rectangle<int> deferredRepaint);
+    bool needsRepaint();
+    void startSync();
+    void endSync();
+    bool startAsync(int frameNumber);
+    void endAsync();
+
+    void setScaleFactor(double scale_);
+    double getScaleFactor() const;
+
+    bool drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness) override;
+    bool fillRoundedRectangle(Rectangle<float> area, float cornerSize) override;
+
+    bool drawEllipse(Rectangle<float> area, float lineThickness) override;
+    bool fillEllipse(Rectangle<float> area) override;
+
+    std::function<void()> onPaintReady = nullptr;
+
+    CriticalSection resizeLock;
 
     //==============================================================================
 private:
     struct SavedState;
 
-    HWND hwnd;
-
     SavedState* currentState;
     OwnedArray<SavedState> states;
 
-    Rectangle<int> bounds;
-
     struct Pimpl;
     std::unique_ptr<Pimpl> pimpl;
+
+    void handleAsyncUpdate() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Direct2DLowLevelGraphicsContext)
 };

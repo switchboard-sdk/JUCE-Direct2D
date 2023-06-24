@@ -64,10 +64,13 @@
 
   /* If you hit a compile error trying to include these files, you may need to update
      your version of the Windows SDK to the latest one. The DirectWrite and Direct2D
-     headers are in the version 7 SDKs.
+     headers are in the version 8 SDKs.
   */
-  #include <d2d1.h>
+  #include <d2d1_2.h>
+  #include <d3d11_1.h>
   #include <dwrite.h>
+  #include <dxgi1_5.h>
+  #include <dcomp.h>
  #endif
 
  #if JUCE_MINGW
@@ -149,6 +152,9 @@
  #include "native/juce_mac_IconHelpers.cpp"
 
 #elif JUCE_WINDOWS
+ #if JUCE_DIRECT2D
+  #include "native/juce_win32_DirectWriteCustomFontCollection.cpp"
+ #endif
  #include "native/juce_win32_DirectWriteTypeface.cpp"
  #include "native/juce_win32_DirectWriteTypeLayout.cpp"
  #include "native/juce_win32_Fonts.cpp"

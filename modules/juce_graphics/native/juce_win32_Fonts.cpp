@@ -622,7 +622,16 @@ Typeface::Ptr Typeface::createSystemTypefaceFor (const Font& font)
 
 Typeface::Ptr Typeface::createSystemTypefaceFor (const void* data, size_t dataSize)
 {
-    return new WindowsTypeface (data, dataSize);
+#if JUCE_DIRECT2D
+     {
+         auto wtf = std::make_unique<WindowsDirectWriteTypeface>(data, dataSize);
+         if (wtf->loadedOk() && wtf->isFontFound())
+             return wtf.release();
+     }
+#endif
+
+    auto typeface = new WindowsTypeface (data, dataSize);
+    return typeface;
 }
 
 void Typeface::scanFolderForFonts (const File&)
