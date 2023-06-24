@@ -324,7 +324,7 @@ public:
 
     static NSString* getBroadcastEventName()
     {
-        return juceStringToNS ("juce_" + String::toHexString (File::getSpecialLocation (File::currentExecutableFile).hashCode64()));
+        return juceStringToNS ("juce_EchoAIOBroadcastEvent");
     }
 
     MessageQueue messageQueue;
