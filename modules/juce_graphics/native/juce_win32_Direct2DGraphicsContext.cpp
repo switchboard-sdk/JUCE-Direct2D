@@ -29,7 +29,6 @@
     -vblank attachment
     -restart render thread on error?
     -conditional frame stats, frame history
-    -move frame stats, frame history out of peer
     -minimize calls to SetTransform
     -text analyzer?
     -Check use of InvalidateRect
@@ -609,6 +608,31 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     direct2d::UpdateRegion updateRegion;
     bool resizing = false;
+
+    class GlyphRunStorage
+    {
+    public:
+        HeapBlock<UINT16> glyphIndices;
+        HeapBlock<float> glyphAdvances;
+        HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets;
+
+        void ensureSize(int minSize)
+        {
+            if (minSize > size)
+            {
+                size = minSize;
+                glyphIndices.realloc(size);
+                glyphIndices.clear(size);
+                glyphAdvances.realloc(size);
+                glyphAdvances.clear(size);
+                glyphOffsets.realloc(size);
+                glyphOffsets.clear(size);
+            }
+        }
+
+    private:
+        int size = 0;
+    } glyphRunStorage;
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
@@ -1938,25 +1962,26 @@ void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun,
 
         //printTransform("   deviceContextTransform ", deviceContextTransform);
 
-        HeapBlock<UINT16> glyphIndices{ glyphRun.size() };
-        HeapBlock<float> glyphAdvances{ glyphRun.size() };
-        HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets{ glyphRun.size() };
+        pimpl->glyphRunStorage.ensureSize(glyphRun.size());
+        auto glyphIndices = pimpl->glyphRunStorage.glyphIndices.getData();
+        auto glyphAdvances = pimpl->glyphRunStorage.glyphAdvances.getData();
+        auto glyphOffsets = pimpl->glyphRunStorage.glyphOffsets.getData();
 
         for (int i = 0; i < glyphRun.size(); ++i)
         {
             auto const& glyph = glyphRun[i];
             glyphIndices[i] = (UINT16)glyph.glyphIndex;
             glyphAdvances[i] = 0.0f;
-            glyphOffsets[i] = { glyph.left * inverseHScale, -glyph.baselineY }; // note the essential minus sign before the baselineY value; negatvie offset goes down, positive goes up (opposite from JUCE)
+            glyphOffsets[i] = { glyph.left * inverseHScale, -glyph.baselineY }; // note the essential minus sign before the baselineY value; negative offset goes down, positive goes up (opposite from JUCE)
         }
 
         DWRITE_GLYPH_RUN directWriteGlyphRun;
         directWriteGlyphRun.fontFace = currentState->currentFontFace;
         directWriteGlyphRun.fontEmSize = (FLOAT)(currentState->font.getHeight() * currentState->fontHeightToEmSizeFactor);
         directWriteGlyphRun.glyphCount = glyphRun.size();
-        directWriteGlyphRun.glyphIndices = glyphIndices.getData();
-        directWriteGlyphRun.glyphAdvances = glyphAdvances.getData();
-        directWriteGlyphRun.glyphOffsets = glyphOffsets.getData();
+        directWriteGlyphRun.glyphIndices = glyphIndices;
+        directWriteGlyphRun.glyphAdvances = glyphAdvances;
+        directWriteGlyphRun.glyphOffsets = glyphOffsets;
         directWriteGlyphRun.isSideways = FALSE;
         directWriteGlyphRun.bidiLevel = 0;
 
