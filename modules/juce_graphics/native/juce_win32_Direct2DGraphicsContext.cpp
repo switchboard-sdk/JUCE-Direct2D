@@ -590,80 +590,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         }
     }
 
-    void run() override
-    {
-        bool fullPresentDone = false;
-
-        while (!threadShouldExit())
-        {
-            //
-            // Wait until a presentation is ready
-            //
-            wait(-1);
-
-            ScopedTryLock locker{ owner.resizeLock };
-            if (!locker.isLocked() || owner.pimpl->resizing)
-            {
-                continue;
-            }
-
-            //
-            // Is a presentation ready?
-            //
-            auto presentation = paintedPresentation.exchange(nullptr);
-            if (presentation == nullptr)
-            {
-                continue;
-            }
-
-            jassert(presentation->state == Presentation::painted);
-
-            //
-            // Render the command list
-            //
-            if (threadDeviceContext == nullptr ||
-                swapChain == nullptr ||
-                swapChainBuffer == nullptr ||
-                presentation->commandList == nullptr)
-            {
-                presentation->status = E_UNEXPECTED;
-                PresentDoneMessage::createAndPost(this, presentation);
-                continue;
-            }
-
-            threadDeviceContext->SetTarget(swapChainBuffer);
-            threadDeviceContext->BeginDraw();
-            threadDeviceContext->DrawImage(presentation->commandList);
-            presentation->status = threadDeviceContext->EndDraw();
-            threadDeviceContext->SetTarget(nullptr);
-
-            //
-            // If this swap chain buffer has never been painted, present the entire window
-            // 
-            // Otherwise, present the update region
-            //
-            {
-                DXGI_PRESENT_PARAMETERS presentParameters{};
-
-                if (fullPresentDone)
-                {
-                    presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
-                    presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
-                }
-
-                presentation->status = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
-                jassert(SUCCEEDED(presentation->status));
-
-                fullPresentDone = SUCCEEDED(presentation->status);
-            }
-
-            //
-            // Post a message indicating that this presentation is done; ready for the next one
-            //
-            PresentDoneMessage::createAndPost(this, presentation);
-        }
-    }
-
     void setScaleFactor(double scale_)
     {
         dpiScalingFactor = scale_;
@@ -721,7 +647,11 @@ private:
             painted
         } state = clear;
 
-        int frameNumber = -1;
+        int frameNumber = 0;
+#if JUCE_DIRECT2D_METRICS
+        double drawDurationSeconds;
+        double presentDurationSeconds;
+#endif
 
         void reset()
         {
@@ -735,6 +665,90 @@ private:
     int presentationIndex = 0;
     std::atomic<Presentation*> paintedPresentation = nullptr;
 
+    void run() override
+    {
+        bool fullPresentDone = false;
+
+        while (!threadShouldExit())
+        {
+            //
+            // Wait until a presentation is ready
+            //
+            wait(-1);
+
+            ScopedTryLock locker{ owner.resizeLock };
+            if (!locker.isLocked() || owner.pimpl->resizing)
+            {
+                continue;
+            }
+
+            //
+            // Is a presentation ready?
+            //
+            auto presentation = paintedPresentation.exchange(nullptr);
+            if (presentation == nullptr)
+            {
+                continue;
+            }
+
+            jassert(presentation->state == Presentation::painted);
+
+            //
+            // Render the command list
+            //
+            if (threadDeviceContext == nullptr ||
+                swapChain == nullptr ||
+                swapChainBuffer == nullptr ||
+                presentation->commandList == nullptr)
+            {
+                presentation->status = E_UNEXPECTED;
+                PresentDoneMessage::createAndPost(this, presentation);
+                continue;
+            }
+
+            {
+#if JUCE_DIRECT2D_METRICS
+                ScopedTimeMeasurement stm{ presentation->drawDurationSeconds };
+#endif
+
+                threadDeviceContext->SetTarget(swapChainBuffer);
+                threadDeviceContext->BeginDraw();
+                threadDeviceContext->DrawImage(presentation->commandList);
+                presentation->status = threadDeviceContext->EndDraw();
+                threadDeviceContext->SetTarget(nullptr);
+            }
+
+            //
+            // If this swap chain buffer has never been painted, present the entire window
+            // 
+            // Otherwise, present the update region
+            //
+            {
+#if JUCE_DIRECT2D_METRICS
+                ScopedTimeMeasurement stm{ presentation->presentDurationSeconds };
+#endif
+
+                DXGI_PRESENT_PARAMETERS presentParameters{};
+
+                if (fullPresentDone)
+                {
+                    presentParameters.DirtyRectsCount = (uint32)presentation->dirtyRectangles.size();
+                    presentParameters.pDirtyRects = presentation->dirtyRectangles.getRawDataPointer();
+                }
+
+                presentation->status = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
+                jassert(SUCCEEDED(presentation->status));
+
+                fullPresentDone = SUCCEEDED(presentation->status);
+            }
+
+            //
+            // Post a message indicating that this presentation is done; ready for the next one
+            //
+            PresentDoneMessage::createAndPost(this, presentation);
+        }
+    }
+
     struct PresentDoneMessage : public CallbackMessage
     {
         PresentDoneMessage(Pimpl* that_, Presentation* presentation_) :
@@ -746,29 +760,9 @@ private:
 
         void messageCallback() override
         {
-            //
-            // Back on the message thread
-            //
             if (that)
             {
-                if (presentation)
-                {
-                    //
-                    // Release the device context if Present1 returned an error
-                    //
-                    auto status = presentation->status;
-                    if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
-                    {
-                        that->releaseDeviceContext();
-                    }
-
-                    presentation->reset();
-                }
-
-                if (that->owner.onPaintReady)
-                {
-                    that->owner.onPaintReady();
-                }
+                that->finishPresentation(presentation);
             }
         }
 
@@ -780,6 +774,33 @@ private:
         WeakReference<Pimpl> that;
         Presentation* presentation;
     };
+
+    void finishPresentation(Presentation* completedPresentation)
+    {
+        if (completedPresentation)
+        {
+            //
+            // Release the device context if Present1 returned an error
+            //
+            auto status = completedPresentation->status;
+            if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
+            {
+                releaseDeviceContext();
+            }
+
+#if JUCE_DIRECT2D_METRICS
+            stats->accumulators[direct2d::PaintStats::threadPaintDuration].addValue(completedPresentation->drawDurationSeconds * 1000.0);
+            stats->accumulators[direct2d::PaintStats::presentDuration].addValue(completedPresentation->presentDurationSeconds * 1000.0);
+#endif
+
+            completedPresentation->reset();
+        }
+
+        if (owner.onPaintReady)
+        {
+            owner.onPaintReady();
+        }
+    }
 
     void createDeviceContext()
     {

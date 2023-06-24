@@ -1740,6 +1740,11 @@ public:
 #endif
 
         suspendResumeRegistration = ScopedSuspendResumeNotificationRegistration { hwnd };
+
+#if JUCE_DIRECT2D_METRICS
+        var statsVar{ stats.get() };
+        component.getProperties().set(stats->propertyName, statsVar);
+#endif
     }
 
     ~HWNDComponentPeer() override
@@ -2854,6 +2859,10 @@ private:
     //==============================================================================
     void handlePaintMessage()
     {
+#if JUCE_DIRECT2D_METRICS
+        direct2d::ScopedElapsedTime elapsedTime{ stats, stats->paintDuration };
+#endif
+
 #if JUCE_DIRECT2D
         if (direct2DContext != nullptr)
         {
@@ -4420,8 +4429,14 @@ private:
                     break;
 
                 case SC_MAXIMIZE:
-                    if (! sendInputAttemptWhenModalMessage())
-                        setFullScreen (true);
+                    if (sendInputAttemptWhenModalMessage())
+                        return 0;
+
+                    setFullScreen (true);
+
+#if JUCE_DIRECT2D
+                    handleDirect2DResize();
+#endif
 
                     return 0;
 
@@ -4439,6 +4454,10 @@ private:
                 case SC_RESTORE:
                     if (sendInputAttemptWhenModalMessage())
                         return 0;
+
+#if JUCE_DIRECT2D
+                    handleDirect2DResize();
+#endif
 
                     if (hasTitleBar())
                     {

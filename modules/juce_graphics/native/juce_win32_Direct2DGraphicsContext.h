@@ -40,19 +40,18 @@ namespace direct2d
         enum
         {
             paintDuration,
-            paintInterval,
             threadPaintDuration,
-            restoreState,
-            end,
-            present,
+            presentDuration,
             numStats
         };
 
         StatisticsAccumulator<double> accumulators[numStats];
+        int64 const creationTime = Time::getMillisecondCounter();
+        double const millisecondsPerTick = 1000.0 / (double)Time::getHighResolutionTicksPerSecond();
         int paintCount = 0;
         int presentCount = 0;
         int64 lastPaintStartTicks = 0;
-        uint64_t lockAcquireMaxTicks = 0;
+        uint64 lockAcquireMaxTicks = 0;
 
         void reset()
         {
@@ -67,6 +66,27 @@ namespace direct2d
         }
 
         using Ptr = ReferenceCountedObjectPtr<PaintStats>;
+
+        static constexpr char propertyName[] = "Direct2DPaintStats";
+    };
+
+    struct ScopedElapsedTime
+    {
+        ScopedElapsedTime(PaintStats::Ptr stats_, int accumulatorIndex_) :
+            stats(stats_),
+            accumulatorIndex(accumulatorIndex_)
+        {
+        }
+
+        ~ScopedElapsedTime()
+        {
+            auto finishTicks = Time::getHighResolutionTicks();
+            stats->accumulators[accumulatorIndex].addValue((finishTicks - startTicks) * stats->millisecondsPerTick);
+        }
+
+        int64 startTicks = Time::getHighResolutionTicks();
+        PaintStats::Ptr stats;
+        int accumulatorIndex;
     };
 }
 
