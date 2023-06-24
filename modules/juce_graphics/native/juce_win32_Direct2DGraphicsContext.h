@@ -33,85 +33,42 @@ typedef HWND__* HWND;
 
 #if JUCE_DIRECT2D_METRICS
 
-struct PaintStats
+namespace direct2d
 {
-    enum
+    struct PaintStats : public ReferenceCountedObject
     {
-        paintDuration,
-        paintInterval,
-        threadPaintDuration,
-        restoreState,
-        end,
-        present,
-        numStats
-    };
-
-    StatisticsAccumulator<double> accumulators[numStats];
-    int paintCount = 0;
-    int presentCount = 0;
-    int64 lastPaintStartTicks = 0;
-    uint64_t lockAcquireMaxTicks = 0;
-
-    void reset()
-    {
-        for (auto& accumulator : accumulators)
+        enum
         {
-            accumulator.reset();
-        }
-        lastPaintStartTicks = 0;
-        paintCount = 0;
-        presentCount = 0;
-        lockAcquireMaxTicks = 0;
-    }
-};
+            paintDuration,
+            paintInterval,
+            threadPaintDuration,
+            restoreState,
+            end,
+            present,
+            numStats
+        };
 
-struct FrameTime
-{
-    int frameNumber = 0;
-    int64_t paintStartTicks = 0;
-    int64_t paintFinishTicks = 0;
-    int64_t threadPaintStartTicks = 0;
-    int64_t threadPaintFinishTicks = 0;
-    int64_t presentStartTicks = 0;
-    int64_t presentFinishTicks = 0;
-};
+        StatisticsAccumulator<double> accumulators[numStats];
+        int paintCount = 0;
+        int presentCount = 0;
+        int64 lastPaintStartTicks = 0;
+        uint64_t lockAcquireMaxTicks = 0;
 
-class FrameHistory
-{
-public:
-    int const frameHistoryLength = 2048;
-    std::deque<FrameTime> const& getQueue() const
-    {
-        return frameTimes;
-    }
-
-    void push(FrameTime& frameTime)
-    {
-        frameTimes.push_back(frameTime);
-        while (frameTimes.size() > frameHistoryLength)
+        void reset()
         {
-            frameTimes.pop_front();
-        }
-    }
-
-    void storePresentTime(int frameNumber, int64_t presentStartTicks, int64_t presentFinishTicks, int64_t threadPaintStart)
-    {
-        for (pointer_sized_int index = frameTimes.size() - 1; index >= 0; --index)
-        {
-            auto& frame = frameTimes[index];
-            if (frame.frameNumber == frameNumber)
+            for (auto& accumulator : accumulators)
             {
-                frame.presentStartTicks = presentStartTicks;
-                frame.presentFinishTicks = presentFinishTicks;
-                frame.threadPaintStartTicks = threadPaintStart;
-                break;
+                accumulator.reset();
             }
+            lastPaintStartTicks = 0;
+            paintCount = 0;
+            presentCount = 0;
+            lockAcquireMaxTicks = 0;
         }
-    }
 
-private:
-    std::deque<FrameTime> frameTimes;
-};
+        using Ptr = ReferenceCountedObjectPtr<PaintStats>;
+    };
+}
 
 #endif
 
@@ -119,7 +76,7 @@ class Direct2DLowLevelGraphicsContext   : public LowLevelGraphicsContext, public
 {
 public:
 #if JUCE_DIRECT2D_METRICS
-    Direct2DLowLevelGraphicsContext(HWND, PaintStats& stats_, FrameHistory& frameHistory_);
+    Direct2DLowLevelGraphicsContext(HWND, direct2d::PaintStats::Ptr stats_);
 #else
     Direct2DLowLevelGraphicsContext(HWND);
 #endif
@@ -198,7 +155,7 @@ private:
     struct SavedState;
 
 #if JUCE_DIRECT2D_METRICS
-    PaintStats& stats;
+    direct2d::PaintStats::Ptr stats;
 #endif
 
     SavedState* currentState;

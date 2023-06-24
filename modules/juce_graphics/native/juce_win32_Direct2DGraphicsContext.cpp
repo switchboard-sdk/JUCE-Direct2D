@@ -261,7 +261,7 @@ namespace juce
 struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 {
 #if JUCE_DIRECT2D_METRICS
-    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, FrameHistory& frameHistory_) :
+    Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, direct2d::PaintStats::Ptr stats_) :
 #else
     Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
 #endif
@@ -269,7 +269,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         hwnd(hwnd_),
         owner(owner_),
 #if JUCE_DIRECT2D_METRICS
-        frameHistory(frameHistory_),
+        stats(stats_),
 #endif
         swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
         bufferCount(2),
@@ -631,10 +631,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 continue;
             }
 
-#if JUCE_DIRECT2D_METRICS
-            presentation->threadBeginDrawTicks = Time::getHighResolutionTicks();
-#endif
-
             threadDeviceContext->SetTarget(swapChainBuffer);
             threadDeviceContext->BeginDraw();
             threadDeviceContext->DrawImage(presentation->commandList);
@@ -648,9 +644,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             //
             {
                 DXGI_PRESENT_PARAMETERS presentParameters{};
-#if JUCE_DIRECT2D_METRICS
-                presentation->presentStartTicks = Time::getHighResolutionTicks();
-#endif
 
                 if (fullPresentDone)
                 {
@@ -662,11 +655,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 jassert(SUCCEEDED(presentation->status));
 
                 fullPresentDone = SUCCEEDED(presentation->status);
-
-#if JUCE_DIRECT2D_METRICS
-                presentation->presentFinishTicks = Time::getHighResolutionTicks();
-                owner.stats.presentCount++;
-#endif
             }
 
             //
@@ -698,9 +686,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
-#if JUCE_DIRECT2D_METRICS
-    FrameHistory& frameHistory;
-#endif
+    direct2d::PaintStats::Ptr stats;
     DXGI_SWAP_EFFECT const swapEffect;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;
@@ -736,11 +722,6 @@ private:
         } state = clear;
 
         int frameNumber = -1;
-#if JUCE_DIRECT2D_METRICS
-        int64_t threadBeginDrawTicks = 0;
-        int64_t presentStartTicks = 0;
-        int64_t presentFinishTicks = 0;
-#endif
 
         void reset()
         {
@@ -770,15 +751,6 @@ private:
             //
             if (that)
             {
-#if JUCE_DIRECT2D_METRICS
-                that->frameHistory.storePresentTime(presentation->frameNumber, 
-                    presentation->presentStartTicks, 
-                    presentation->presentFinishTicks,
-                    presentation->threadBeginDrawTicks);
-                that->owner.stats.accumulators[PaintStats::threadPaintDuration].addValue(Time::highResolutionTicksToSeconds(presentation->presentStartTicks - presentation->threadBeginDrawTicks));
-                that->owner.stats.accumulators[PaintStats::present].addValue(Time::highResolutionTicksToSeconds(presentation->presentFinishTicks - presentation->presentStartTicks));
-#endif
-
                 if (presentation)
                 {
                     //
@@ -1266,9 +1238,9 @@ public:
 
 //==============================================================================
 #if JUCE_DIRECT2D_METRICS
-Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, PaintStats& stats_, FrameHistory& frameHistory_)
+Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext (HWND hwnd_, direct2d::PaintStats::Ptr stats_)
     : currentState (nullptr),
-      pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), frameHistory_)),
+      pimpl (new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), stats_)),
       stats(stats_)
 #else
 Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_)
