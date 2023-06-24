@@ -220,14 +220,12 @@ Rectangle<int> Graphics::getClipBounds() const
 
 void Graphics::saveState()
 {
-
     saveStateIfPending();
     saveStatePending = true;
 }
 
 void Graphics::restoreState()
 {
-
     if (saveStatePending)
         saveStatePending = false;
     else
