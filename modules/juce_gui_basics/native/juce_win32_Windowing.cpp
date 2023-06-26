@@ -4392,8 +4392,14 @@ private:
                     break;
 
                 case SC_MAXIMIZE:
-                    if (! sendInputAttemptWhenModalMessage())
-                        setFullScreen (true);
+                    if (sendInputAttemptWhenModalMessage())
+                        return 0;
+
+                    setFullScreen(true);
+
+#if JUCE_DIRECT2D
+                    handleDirect2DResize();
+#endif
 
                     return 0;
 
@@ -4411,6 +4417,10 @@ private:
                 case SC_RESTORE:
                     if (sendInputAttemptWhenModalMessage())
                         return 0;
+
+#if JUCE_DIRECT2D
+                    handleDirect2DResize();
+#endif
 
                     if (hasTitleBar())
                     {
