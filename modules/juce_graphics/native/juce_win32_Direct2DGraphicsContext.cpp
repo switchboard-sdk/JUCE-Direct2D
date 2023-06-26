@@ -29,10 +29,10 @@
     -vblank attachment
     -restart render thread on error?
     -conditional frame stats, frame history
-    -move frame stats, frame history out of peer
     -minimize calls to SetTransform
     -text analyzer?
     -Check use of InvalidateRect
+    -Always present 
 
 */
 
@@ -583,6 +583,76 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         }
     }
 
+    void setScaleFactor(double scale_)
+    {
+        dpiScalingFactor = scale_;
+
+        updateDeviceContextDPI();
+    }
+
+    double getScaleFactor() const
+    {
+        return dpiScalingFactor;
+    }
+
+    HWND hwnd = nullptr;
+    SharedResourcePointer<Direct2DFactories> sharedFactories;
+    ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
+    ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
+
+    direct2d::UpdateRegion updateRegion;
+    bool resizing = false;
+
+private:
+    Direct2DLowLevelGraphicsContext& owner;
+    DXGI_SWAP_EFFECT const swapEffect;
+    UINT const bufferCount;
+    DXGI_SCALING const dxgiScaling;
+    double dpiScalingFactor = 1.0;
+    juce::Rectangle<int> bufferBounds{ 1, 1 };
+    uint32 const swapChainFlags;
+    uint32 const presentSyncInterval;
+    uint32 const presentFlags;
+    ComSmartPtr<ID2D1DeviceContext> commandListDeviceContext;
+    ComSmartPtr<ID2D1DeviceContext> threadDeviceContext;
+    ComSmartPtr<IDXGISwapChain1> swapChain;
+    ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
+    ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
+    ComSmartPtr<IDCompositionDevice> compositionDevice;
+    ComSmartPtr<IDCompositionTarget> compositionTarget;
+    ComSmartPtr<IDCompositionVisual> compositionVisual;
+
+    struct Presentation
+    {
+        HRESULT status = S_OK;
+
+        ComSmartPtr<ID2D1CommandList> commandList;
+        
+        RectangleList<int> paintAreas;
+        Rectangle<int> bufferBounds;
+        Array<RECT> dirtyRectangles;
+        
+        enum State
+        {
+            clear,
+            painting,
+            painted
+        } state = clear;
+
+        int frameNumber = 0;
+
+        void reset()
+        {
+            state = clear;
+            paintAreas.clear();
+            dirtyRectangles.clearQuick();
+            commandList = nullptr;
+        }
+
+    } presentations[2];
+    int presentationIndex = 0;
+    std::atomic<Presentation*> paintedPresentation = nullptr;
+
     void run() override
     {
         bool fullPresentDone = false;
@@ -657,76 +727,6 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         }
     }
 
-    void setScaleFactor(double scale_)
-    {
-        dpiScalingFactor = scale_;
-
-        updateDeviceContextDPI();
-    }
-
-    double getScaleFactor() const
-    {
-        return dpiScalingFactor;
-    }
-
-    HWND hwnd = nullptr;
-    SharedResourcePointer<Direct2DFactories> sharedFactories;
-    ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
-    ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
-
-    direct2d::UpdateRegion updateRegion;
-    bool resizing = false;
-
-private:
-    Direct2DLowLevelGraphicsContext& owner;
-    DXGI_SWAP_EFFECT const swapEffect;
-    UINT const bufferCount;
-    DXGI_SCALING const dxgiScaling;
-    double dpiScalingFactor = 1.0;
-    juce::Rectangle<int> bufferBounds{ 1, 1 };
-    uint32 const swapChainFlags;
-    uint32 const presentSyncInterval;
-    uint32 const presentFlags;
-    ComSmartPtr<ID2D1DeviceContext> commandListDeviceContext;
-    ComSmartPtr<ID2D1DeviceContext> threadDeviceContext;
-    ComSmartPtr<IDXGISwapChain1> swapChain;
-    ComSmartPtr<ID2D1Bitmap1> swapChainBuffer;
-    ComSmartPtr<ID2D1SolidColorBrush> colourBrush;
-    ComSmartPtr<IDCompositionDevice> compositionDevice;
-    ComSmartPtr<IDCompositionTarget> compositionTarget;
-    ComSmartPtr<IDCompositionVisual> compositionVisual;
-
-    struct Presentation
-    {
-        HRESULT status = S_OK;
-
-        ComSmartPtr<ID2D1CommandList> commandList;
-        
-        RectangleList<int> paintAreas;
-        Rectangle<int> bufferBounds;
-        Array<RECT> dirtyRectangles;
-        
-        enum State
-        {
-            clear,
-            painting,
-            painted
-        } state = clear;
-
-        int frameNumber = -1;
-
-        void reset()
-        {
-            state = clear;
-            paintAreas.clear();
-            dirtyRectangles.clearQuick();
-            commandList = nullptr;
-        }
-
-    } presentations[2];
-    int presentationIndex = 0;
-    std::atomic<Presentation*> paintedPresentation = nullptr;
-
     struct PresentDoneMessage : public CallbackMessage
     {
         PresentDoneMessage(Pimpl* that_, Presentation* presentation_) :
@@ -738,29 +738,9 @@ private:
 
         void messageCallback() override
         {
-            //
-            // Back on the message thread
-            //
             if (that)
             {
-                if (presentation)
-                {
-                    //
-                    // Release the device context if Present1 returned an error
-                    //
-                    auto status = presentation->status;
-                    if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
-                    {
-                        that->releaseDeviceContext();
-                    }
-
-                    presentation->reset();
-                }
-
-                if (that->owner.onPaintReady)
-                {
-                    that->owner.onPaintReady();
-                }
+                that->finishPresentation(presentation);
             }
         }
 
@@ -772,6 +752,28 @@ private:
         WeakReference<Pimpl> that;
         Presentation* presentation;
     };
+
+    void finishPresentation(Presentation* completedPresentation)
+    {
+        if (completedPresentation)
+        {
+            //
+            // Release the device context if Present1 returned an error
+            //
+            auto status = completedPresentation->status;
+            if (status != S_OK && status != DXGI_STATUS_OCCLUDED)
+            {
+                releaseDeviceContext();
+            }
+
+            completedPresentation->reset();
+        }
+
+        if (owner.onPaintReady)
+        {
+            owner.onPaintReady();
+        }
+    }
 
     void createDeviceContext()
     {
