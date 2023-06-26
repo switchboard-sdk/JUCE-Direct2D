@@ -636,7 +636,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
 private:
     Direct2DLowLevelGraphicsContext& owner;
+#if JUCE_DIRECT2D_METRICS
     direct2d::PaintStats::Ptr stats;
+#endif
     DXGI_SWAP_EFFECT const swapEffect;
     UINT const bufferCount;
     DXGI_SCALING const dxgiScaling;

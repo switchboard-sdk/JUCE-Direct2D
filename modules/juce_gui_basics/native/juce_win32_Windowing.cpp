@@ -1742,8 +1742,7 @@ public:
         suspendResumeRegistration = ScopedSuspendResumeNotificationRegistration { hwnd };
 
 #if JUCE_DIRECT2D_METRICS
-        var statsVar{ stats.get() };
-        component.getProperties().set(stats->propertyName, statsVar);
+        component.getProperties().set(stats->propertyName, stats.get());
 #endif
     }
 
@@ -2430,7 +2429,9 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
+    #if JUCE_DIRECT2D_METRICS
     direct2d::PaintStats::Ptr stats = new direct2d::PaintStats{};
+    #endif
     int frameNumber = 0;
    #endif
     uint32 lastPaintTime = 0;
