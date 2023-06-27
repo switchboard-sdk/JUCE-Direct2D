@@ -32,6 +32,8 @@
     -minimize calls to SetTransform
     -text analyzer?
     -Check use of InvalidateRect
+    -fix performAnyPendingRepaintsNow
+    -child window clipping?
 
 */
 
