@@ -142,6 +142,14 @@ namespace direct2d
                 frames.pop_back();
             }
 
+            if (frames.size() > 0)
+            {
+                if (auto& lastFrame = frames.front(); lastFrame.frameFinishTicks == 0)
+                {
+                    frames.pop_front();
+                }
+            }
+
             frames.push_front(Frame{ frameNumber });
         }
 
@@ -227,8 +235,8 @@ namespace direct2d
     };
 }
 
-#define D2D_START_FRAME if (stats->frames.size() < stats->maxFrames) stats->startFrame(frameNumber);
-#define D2D_FINISH_FRAME if (stats->frames.size() < stats->maxFrames) stats->finishFrame();
+#define D2D_START_FRAME stats->startFrame(frameNumber);
+#define D2D_FINISH_FRAME stats->finishFrame();
 #define D2D_SCOPED_PAINT_EVENT(code, name) direct2d::ScopedPaintEvent scopedEvent(stats, direct2d::PaintEvent:: code, name);
 //#define D2D_SCOPED_PAINT_EVENT(code, name) stats->getMostRecentFrame().numEvents++;
 

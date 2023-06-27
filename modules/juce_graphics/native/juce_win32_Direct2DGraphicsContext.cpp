@@ -429,20 +429,23 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     void addDeferredRepaint(Rectangle<int> deferredRepaint)
     {
-        auto* const presentation = presentations + presentationIndex;
-        presentation->paintAreas.add(deferredRepaint);
+        //auto* const presentation = presentations + presentationIndex;
+        //presentation->paintAreas.add(deferredRepaint);
+        deferredRepaints.add(deferredRepaint);
     }
 
     void clearDeferredRepaints()
     {
-        auto* const presentation = presentations + presentationIndex;
-        presentation->paintAreas.clear();
+        //auto* const presentation = presentations + presentationIndex;
+        //presentation->paintAreas.clear();
+        deferredRepaints.clear();
     }
 
     bool needsRepaint() const
     {
-        auto* const presentation = presentations + presentationIndex;
-        return presentation->paintAreas.getNumRectangles() > 0;
+        //auto* const presentation = presentations + presentationIndex;
+        //return presentation->paintAreas.getNumRectangles() > 0;
+        return deferredRepaints.getNumRectangles() > 0;
     }
 
     bool isReadyToPaint() const
@@ -482,7 +485,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         ValidateRect(hwnd, nullptr);
     }
 
-    bool startRenderAsync(int frameNumber, RectangleList<int>& clipAreas)
+    bool startRenderAsync(int frameNumber, Rectangle<int>& clipArea)
     {
         //
         // Ready to paint? Return if the previous presentation has not been presented
@@ -498,16 +501,19 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         // Any areas to update?
         //
         updateRegion.refresh(hwnd);
-        if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
+        if (updateRegion.getNumRECT() == 0 && deferredRepaints.getNumRectangles() == 0)
         {
             return false;
         }
-        updateRegion.addToRectangleList(presentation->paintAreas);
+        //updateRegion.addToRectangleList(presentation->paintAreas);
         ValidateRgn(hwnd, updateRegion.regionHandle);
 
-        stats->getMostRecentFrame().rects = presentation->paintAreas;
+        presentation->paintArea = deferredRepaints.getRectangle(0);
+        deferredRepaints.subtract(presentation->paintArea);
+        //stats->getMostRecentFrame().rects = presentation->paintAreas;
+        stats->getMostRecentFrame().rects.add(presentation->paintArea);
 
-        clipAreas = presentation->paintAreas;
+        clipArea = presentation->paintArea;
 
         //
         // Start painting
@@ -515,9 +521,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         presentation->frameNumber = frameNumber;
         presentation->state = Presentation::painting;
 
-#if 1 // JUCE_DEBUG
+#if 0 // JUCE_DEBUG
         DBG("\nstart async");
-        for (auto const area : presentation->paintAreas)
+        //for (auto const area : presentation->paintAreas)
         {
             DBG("   area " << area.toString());
         }
@@ -557,7 +563,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 return;
             }
 
-            auto paintBounds = presentation->paintAreas.getBounds();
+            auto paintBounds = presentation->paintArea; // paintAreas.getBounds();
             if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
             {
                 return;
@@ -566,11 +572,12 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             presentation->state = Presentation::painted;
 
             {
-                presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
+                presentation->dirtyRectangles.ensureStorageAllocated(1);// presentation->paintAreas.getNumRectangles());
                 presentation->dirtyRectangles.clearQuick();
 
-                for (auto paintArea : presentation->paintAreas)
+                //for (auto paintArea : presentation->paintAreas)
                 {
+                    auto paintArea = presentation->paintArea;
                     paintArea = paintArea.getIntersection(bufferBounds);
                     if (!paintArea.isEmpty())
                     {
@@ -661,6 +668,7 @@ private:
     ComSmartPtr<IDCompositionDevice> compositionDevice;
     ComSmartPtr<IDCompositionTarget> compositionTarget;
     ComSmartPtr<IDCompositionVisual> compositionVisual;
+    RectangleList<int> deferredRepaints;
 
     struct Presentation
     {
@@ -668,7 +676,7 @@ private:
 
         ComSmartPtr<ID2D1CommandList> commandList;
         
-        RectangleList<int> paintAreas;
+        Rectangle<int> paintArea;
         Rectangle<int> bufferBounds;
         Array<RECT> dirtyRectangles;
         
@@ -688,7 +696,7 @@ private:
         void reset()
         {
             state = clear;
-            paintAreas.clear();
+            paintArea = {};
             dirtyRectangles.clearQuick();
             commandList = nullptr;
         }
@@ -1327,7 +1335,7 @@ void Direct2DLowLevelGraphicsContext::finishResizing()
 
 void Direct2DLowLevelGraphicsContext::addDeferredRepaint(Rectangle<int> deferredRepaint)
 {
-    DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
+    //DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
     pimpl->addDeferredRepaint(deferredRepaint);
 
     triggerAsyncUpdate();
@@ -1347,19 +1355,18 @@ bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
 
     D2D_START_FRAME
 
-        //Rectangle<int> initialClipBounds;
-        RectangleList<int> clipAreas;
+    Rectangle<int> initialClipBounds;
 
-    if (pimpl->startRenderAsync(frameNumber, clipAreas))
+    if (pimpl->startRenderAsync(frameNumber, initialClipBounds))
     {
         saveState();
 
-        if (clipAreas.getBounds().isEmpty() == false)
+        if (initialClipBounds.isEmpty() == false)
         {
-            clipToRectangleList(clipAreas);
+            clipToRectangle(initialClipBounds);
         }
 
-        DBG("initial clip area " << clipAreas.getBounds().toString());
+        //DBG("initial clip area " << clipAreas.getBounds().toString());
 
         return true;
     }
