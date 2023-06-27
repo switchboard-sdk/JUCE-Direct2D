@@ -328,6 +328,8 @@ namespace juce
         ComSmartPtr<IDCompositionDevice> compositionDevice;
         ComSmartPtr<IDCompositionTarget> compositionTarget;
         ComSmartPtr<IDCompositionVisual> compositionVisual;
+
+        std::deque<Rectangle<int>> deferredRepaints;
         direct2d::Presentation presentations[2];
         int presentationIndex = 0;
         std::atomic<direct2d::Presentation*> paintedPresentation = nullptr;
@@ -793,20 +795,25 @@ namespace juce
 
         void addDeferredRepaint(Rectangle<int> deferredRepaint)
         {
-            auto* const presentation = presentations + presentationIndex;
-            presentation->paintAreas.add(deferredRepaint);
+            for (auto const& r : deferredRepaints)
+            {
+                if (r.contains(deferredRepaint))
+                {
+                    return;
+                }
+            }
+
+            deferredRepaints.push_back(deferredRepaint);
         }
 
         void clearDeferredRepaints()
         {
-            auto* const presentation = presentations + presentationIndex;
-            presentation->paintAreas.clear();
+            deferredRepaints.clear();
         }
 
         bool needsRepaint() const
         {
-            auto* const presentation = presentations + presentationIndex;
-            return presentation->paintAreas.getNumRectangles() > 0;
+            return deferredRepaints.size() > 0;
         }
 
         bool isReadyToPaint() const
@@ -862,13 +869,27 @@ namespace juce
             // Any areas to update?
             //
             updateRegion.refresh(hwnd);
-            if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
+            if (updateRegion.getNumRECT() == 0 && deferredRepaints.size() == 0)
             {
                 return false;
             }
 
-            updateRegion.addToRectangleList(presentation->paintAreas);
-            ValidateRgn(hwnd, updateRegion.regionHandle);
+            //
+            // Just pop one rectangle off from the front of deferredRepaints and paint that area; this made
+            // a big difference in performance with the JUCE TableListBox demo
+            // 
+            presentation->paintAreas.add(deferredRepaints.front());
+            deferredRepaints.pop_front();
+
+            //
+            // There may also be additional invalid areas indicated by WM_PAINT messages, so
+            // add those to the paint area rectangle list
+            //
+            if (updateRegion.getNumRECT() > 0)
+            {
+                updateRegion.addToRectangleList(presentation->paintAreas);
+                ValidateRgn(hwnd, updateRegion.regionHandle);
+            }
 
             initialClipBounds = presentation->paintAreas.getBounds();
 
@@ -878,7 +899,7 @@ namespace juce
             presentation->frameNumber = frameNumber;
             presentation->state = direct2d::Presentation::painting;
 
-#if 0 // JUCE_DEBUG
+#if JUCE_DEBUG
             for (auto const area : presentation->paintAreas)
             {
                 DBG("   area " << area.toString());
