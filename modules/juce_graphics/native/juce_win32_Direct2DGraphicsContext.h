@@ -66,8 +66,6 @@ namespace direct2d
         }
 
         using Ptr = ReferenceCountedObjectPtr<PaintStats>;
-
-        static constexpr char propertyName[] = "Direct2DPaintStats";
     };
 
     struct ScopedElapsedTime

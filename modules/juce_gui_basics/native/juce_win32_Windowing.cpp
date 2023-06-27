@@ -1740,11 +1740,6 @@ public:
 #endif
 
         suspendResumeRegistration = ScopedSuspendResumeNotificationRegistration { hwnd };
-
-#if JUCE_DIRECT2D_METRICS
-        var statsVar{ stats.get() };
-        component.getProperties().set(stats->propertyName, statsVar);
-#endif
     }
 
     ~HWNDComponentPeer() override
@@ -2430,7 +2425,6 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
-    direct2d::PaintStats::Ptr stats = new direct2d::PaintStats{};
     int frameNumber = 0;
    #endif
     uint32 lastPaintTime = 0;
@@ -2933,6 +2927,7 @@ private:
         {
             handlePaint(*direct2DContext);
             direct2DContext->endAsync();
+            frameNumber++;
         }
     }
 
