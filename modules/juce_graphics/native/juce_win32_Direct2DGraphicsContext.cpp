@@ -35,6 +35,22 @@
 
 */
 
+#ifdef __INTELLISENSE__
+
+#define JUCE_CORE_INCLUDE_COM_SMART_PTR 1
+#define JUCE_WINDOWS 1
+
+#include <windows.h>
+#include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
+#include <d2d1_2.h>
+#include <d3d11_1.h>
+#include <dwrite.h>
+#include <dxgi1_5.h>
+#include <dcomp.h>
+
+#endif
+
 namespace juce
 {
 
@@ -291,382 +307,6 @@ namespace juce
 
     struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
     {
-#if JUCE_DIRECT2D_METRICS
-        Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, direct2d::PaintStats::Ptr stats_) :
-#else
-        Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
-#endif
-            Thread("Direct2DLowLevelGraphicsContext"),
-            hwnd(hwnd_),
-            owner(owner_),
-#if JUCE_DIRECT2D_METRICS
-            stats(stats_),
-#endif
-            swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
-            bufferCount(2),
-            dxgiScaling(DXGI_SCALING_STRETCH),
-            swapChainFlags(tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
-            presentSyncInterval(tearingSupported_ ? 0 : 1),
-            presentFlags(tearingSupported_ ? DXGI_PRESENT_ALLOW_TEARING : 0)
-        {
-#if JUCE_DEBUG
-            D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_INFORMATION };
-#else
-            D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_NONE };
-#endif
-
-            auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
-            jassertquiet(SUCCEEDED(hr));
-
-            startThread(Priority::highest);
-        }
-
-        ~Pimpl() override
-        {
-            stopThread(1000);
-        }
-
-        //
-        // ScopedGeometryWithSink creates an ID2D1PathGeometry object with an open sink. 
-        // D.R.Y. for rectToPathGeometry, rectListToPathGeometry, and pathToPathGeometry
-        //
-        struct ScopedGeometryWithSink
-        {
-            ScopedGeometryWithSink(ID2D1Factory* factory, D2D1_FILL_MODE fillMode)
-            {
-                auto hr = factory->CreatePathGeometry(geometry.resetAndGetPointerAddress());
-                if (SUCCEEDED(hr))
-                {
-                    hr = geometry->Open(sink.resetAndGetPointerAddress());
-                    if (SUCCEEDED(hr))
-                    {
-                        sink->SetFillMode(fillMode);
-                    }
-                }
-            }
-
-            ~ScopedGeometryWithSink()
-            {
-                if (sink != nullptr)
-                {
-                    auto hr = sink->Close();
-                    jassertquiet(SUCCEEDED(hr));
-                }
-            }
-
-            ComSmartPtr<ID2D1PathGeometry> geometry;
-            ComSmartPtr<ID2D1GeometrySink> sink;
-        };
-
-        ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
-        {
-            ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
-
-            if (objects.sink != nullptr)
-            {
-                direct2d::rectToGeometrySink(rect, objects.sink, transform);
-                return { (ID2D1Geometry*)objects.geometry };
-            }
-
-            return nullptr;
-        }
-
-        ComSmartPtr<ID2D1Geometry> rectListToPathGeometry(const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
-        {
-            ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
-
-            if (objects.sink != nullptr)
-            {
-                for (int i = clipRegion.getNumRectangles(); --i >= 0;)
-                    direct2d::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
-
-                return { (ID2D1Geometry*)objects.geometry };
-            }
-
-            return nullptr;
-        }
-
-        ComSmartPtr<ID2D1Geometry> pathToPathGeometry(const Path& path, const AffineTransform& transform)
-        {
-            ScopedGeometryWithSink objects{ d2dDedicatedFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
-
-            if (objects.sink != nullptr)
-            {
-                direct2d::pathToGeometrySink(path, objects.sink, transform);
-
-                return { (ID2D1Geometry*)objects.geometry };
-            }
-
-            return nullptr;
-        }
-
-        ID2D1DeviceContext* const getDeviceContext() const
-        {
-            return commandListDeviceContext;
-        }
-
-        ID2D1SolidColorBrush* const getColourBrush() const
-        {
-            return colourBrush;
-        }
-
-        Rectangle<int> getClientRect() const
-        {
-            RECT windowRect;
-            GetClientRect(hwnd, &windowRect);
-
-            return Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
-        }
-
-        void resize()
-        {
-            //
-            // Get the width & height from the client area; make sure width and height are between 1 and 16384
-            //
-            int constexpr minSize = 1;
-            int constexpr maxSize = 16384;
-            auto windowRect = getClientRect().getUnion({ minSize, minSize }).getIntersection({ maxSize, maxSize });
-            if (bufferBounds == windowRect)
-            {
-                return;
-            }
-
-            bufferBounds = windowRect;
-
-            //
-            // Resize the swap chain buffer
-            //
-            if (swapChain != nullptr)
-            {
-                swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
-
-                auto scaledBufferBounds = bufferBounds * dpiScalingFactor;
-                auto hr = swapChain->ResizeBuffers(0, scaledBufferBounds.getWidth(), scaledBufferBounds.getHeight(), DXGI_FORMAT_UNKNOWN, swapChainFlags);
-
-                if (SUCCEEDED(hr))
-                {
-                    createSwapChainBuffer();
-                }
-                else
-                {
-                    releaseDeviceContext();
-                }
-            }
-        }
-
-        Rectangle<int> getBufferBounds() const
-        {
-            return bufferBounds;
-        }
-
-        void addDeferredRepaint(Rectangle<int> deferredRepaint)
-        {
-            auto* const presentation = presentations + presentationIndex;
-            presentation->paintAreas.add(deferredRepaint);
-        }
-
-        void clearDeferredRepaints()
-        {
-            auto* const presentation = presentations + presentationIndex;
-            presentation->paintAreas.clear();
-        }
-
-        bool needsRepaint() const
-        {
-            auto* const presentation = presentations + presentationIndex;
-            return presentation->paintAreas.getNumRectangles() > 0;
-        }
-
-        bool isReadyToPaint() const
-        {
-            return presentations[presentationIndex ^ 1].state == direct2d::Presentation::clear;
-        }
-
-        void startRenderSync(Rectangle<int>& initialClipBounds)
-        {
-            clearDeferredRepaints();
-            paintedPresentation.store(nullptr);
-
-            createDeviceContext();
-            if (commandListDeviceContext != nullptr)
-            {
-                createSwapChainBuffer();
-                if (swapChainBuffer != nullptr)
-                {
-                    commandListDeviceContext->SetTarget(swapChainBuffer);
-                    commandListDeviceContext->BeginDraw();
-                }
-            }
-
-            initialClipBounds = getClientRect();
-        }
-
-        void finishRenderSync()
-        {
-            auto hr = commandListDeviceContext->EndDraw();
-            commandListDeviceContext->SetTarget(nullptr);
-
-            if (SUCCEEDED(hr))
-            {
-                swapChain->Present(presentSyncInterval, presentFlags);
-            }
-
-            ValidateRect(hwnd, nullptr);
-        }
-
-        bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
-        {
-            //
-            // Ready to paint? Return if the previous presentation has not been presented
-            //
-            if (!isReadyToPaint())
-            {
-                return false;
-            }
-
-            auto* const presentation = presentations + presentationIndex;
-
-            //
-            // Any areas to update?
-            //
-            updateRegion.refresh(hwnd);
-            if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
-            {
-                return false;
-            }
-            updateRegion.addToRectangleList(presentation->paintAreas);
-            ValidateRgn(hwnd, updateRegion.regionHandle);
-
-            initialClipBounds = presentation->paintAreas.getBounds();
-
-            //
-            // Start painting
-            //
-            presentation->frameNumber = frameNumber;
-            presentation->state = direct2d::Presentation::painting;
-
-#if 0 // JUCE_DEBUG
-            for (auto const area : presentation->paintAreas)
-            {
-                DBG("   area " << area.toString());
-            }
-
-            for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
-            {
-                DBG("   update " << direct2d::RECTToRectangle<int>(updateRegion.getRECTArray()[i]).toString());
-            }
-#endif
-
-            createDeviceContext();
-            if (commandListDeviceContext != nullptr)
-            {
-                createSwapChainBuffer();
-                if (swapChainBuffer != nullptr)
-                {
-                    commandListDeviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
-                    commandListDeviceContext->SetTarget(presentation->commandList);
-                    commandListDeviceContext->BeginDraw();
-                }
-            }
-
-            return true;
-        }
-
-        void finishRenderAsync()
-        {
-            if (commandListDeviceContext != nullptr && swapChain != nullptr)
-            {
-                auto* const presentation = presentations + presentationIndex;
-
-                auto hr = commandListDeviceContext->EndDraw();
-                commandListDeviceContext->SetTarget(nullptr);
-                presentation->commandList->Close();
-                if (FAILED(hr))
-                {
-                    return;
-                }
-
-                auto paintBounds = presentation->paintAreas.getBounds();
-                if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
-                {
-                    return;
-                }
-
-                presentation->state = direct2d::Presentation::painted;
-
-                {
-                    presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
-                    presentation->dirtyRectangles.clearQuick();
-
-                    for (auto paintArea : presentation->paintAreas)
-                    {
-                        paintArea = paintArea.getIntersection(bufferBounds);
-                        if (!paintArea.isEmpty())
-                        {
-                            presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
-                        }
-                    }
-
-                    presentation->bufferBounds = bufferBounds;
-                }
-
-                paintedPresentation.store(presentation);
-
-                presentationIndex ^= 1;
-                notify();
-
-                if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
-                {
-                    releaseDeviceContext();
-                }
-            }
-        }
-
-        void setScaleFactor(double scale_)
-        {
-            dpiScalingFactor = scale_;
-
-            updateDeviceContextDPI();
-        }
-
-        double getScaleFactor() const
-        {
-            return dpiScalingFactor;
-        }
-
-        HWND hwnd = nullptr;
-        SharedResourcePointer<Direct2DFactories> sharedFactories;
-        ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
-        ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
-
-        direct2d::UpdateRegion updateRegion;
-        bool resizing = false;
-
-        class GlyphRunStorage
-        {
-        public:
-            HeapBlock<UINT16> glyphIndices;
-            HeapBlock<float> glyphAdvances;
-            HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets;
-
-            void ensureSize(int minSize)
-            {
-                if (minSize > size)
-                {
-                    size = minSize;
-                    glyphIndices.realloc(size);
-                    glyphIndices.clear(size);
-                    glyphAdvances.realloc(size);
-                    glyphAdvances.clear(size);
-                    glyphOffsets.realloc(size);
-                    glyphOffsets.clear(size);
-                }
-            }
-
-        private:
-            int size = 0;
-        } glyphRunStorage;
-
     private:
         Direct2DLowLevelGraphicsContext& owner;
 #if JUCE_DIRECT2D_METRICS
@@ -688,7 +328,6 @@ namespace juce
         ComSmartPtr<IDCompositionDevice> compositionDevice;
         ComSmartPtr<IDCompositionTarget> compositionTarget;
         ComSmartPtr<IDCompositionVisual> compositionVisual;
-        std::deque<Rectangle<int>> deferredRepaints;
         direct2d::Presentation presentations[2];
         int presentationIndex = 0;
         std::atomic<direct2d::Presentation*> paintedPresentation = nullptr;
@@ -982,6 +621,384 @@ namespace juce
         }
 
         JUCE_DECLARE_WEAK_REFERENCEABLE(Pimpl)
+
+    public:
+#if JUCE_DIRECT2D_METRICS
+        Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_, direct2d::PaintStats::Ptr stats_) :
+#else
+        Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
+#endif
+            Thread("Direct2DLowLevelGraphicsContext"),
+            hwnd(hwnd_),
+            owner(owner_),
+#if JUCE_DIRECT2D_METRICS
+            stats(stats_),
+#endif
+            swapEffect(DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL),
+            bufferCount(2),
+            dxgiScaling(DXGI_SCALING_STRETCH),
+            swapChainFlags(tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
+            presentSyncInterval(tearingSupported_ ? 0 : 1),
+            presentFlags(tearingSupported_ ? DXGI_PRESENT_ALLOW_TEARING : 0)
+        {
+#if JUCE_DEBUG
+            D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_INFORMATION };
+#else
+            D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_NONE };
+#endif
+
+            auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
+            jassertquiet(SUCCEEDED(hr));
+
+            startThread(Priority::highest);
+        }
+
+        ~Pimpl() override
+        {
+            stopThread(1000);
+        }
+
+        //
+        // ScopedGeometryWithSink creates an ID2D1PathGeometry object with an open sink. 
+        // D.R.Y. for rectToPathGeometry, rectListToPathGeometry, and pathToPathGeometry
+        //
+        struct ScopedGeometryWithSink
+        {
+            ScopedGeometryWithSink(ID2D1Factory* factory, D2D1_FILL_MODE fillMode)
+            {
+                auto hr = factory->CreatePathGeometry(geometry.resetAndGetPointerAddress());
+                if (SUCCEEDED(hr))
+                {
+                    hr = geometry->Open(sink.resetAndGetPointerAddress());
+                    if (SUCCEEDED(hr))
+                    {
+                        sink->SetFillMode(fillMode);
+                    }
+                }
+            }
+
+            ~ScopedGeometryWithSink()
+            {
+                if (sink != nullptr)
+                {
+                    auto hr = sink->Close();
+                    jassertquiet(SUCCEEDED(hr));
+                }
+            }
+
+            ComSmartPtr<ID2D1PathGeometry> geometry;
+            ComSmartPtr<ID2D1GeometrySink> sink;
+        };
+
+        ComSmartPtr<ID2D1Geometry> rectToPathGeometry(const Rectangle<int>& rect, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+        {
+            ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
+
+            if (objects.sink != nullptr)
+            {
+                direct2d::rectToGeometrySink(rect, objects.sink, transform);
+                return { (ID2D1Geometry*)objects.geometry };
+            }
+
+            return nullptr;
+        }
+
+        ComSmartPtr<ID2D1Geometry> rectListToPathGeometry(const RectangleList<int>& clipRegion, const AffineTransform& transform, D2D1_FILL_MODE fillMode)
+        {
+            ScopedGeometryWithSink objects{ d2dDedicatedFactory, fillMode };
+
+            if (objects.sink != nullptr)
+            {
+                for (int i = clipRegion.getNumRectangles(); --i >= 0;)
+                    direct2d::rectToGeometrySink(clipRegion.getRectangle(i), objects.sink, transform);
+
+                return { (ID2D1Geometry*)objects.geometry };
+            }
+
+            return nullptr;
+        }
+
+        ComSmartPtr<ID2D1Geometry> pathToPathGeometry(const Path& path, const AffineTransform& transform)
+        {
+            ScopedGeometryWithSink objects{ d2dDedicatedFactory, path.isUsingNonZeroWinding() ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE };
+
+            if (objects.sink != nullptr)
+            {
+                direct2d::pathToGeometrySink(path, objects.sink, transform);
+
+                return { (ID2D1Geometry*)objects.geometry };
+            }
+
+            return nullptr;
+        }
+
+        ID2D1DeviceContext* const getDeviceContext() const
+        {
+            return commandListDeviceContext;
+        }
+
+        ID2D1SolidColorBrush* const getColourBrush() const
+        {
+            return colourBrush;
+        }
+
+        Rectangle<int> getClientRect() const
+        {
+            RECT windowRect;
+            GetClientRect(hwnd, &windowRect);
+
+            return Rectangle<int>::leftTopRightBottom(windowRect.left, windowRect.top, windowRect.right, windowRect.bottom);
+        }
+
+        void resize()
+        {
+            //
+            // Get the width & height from the client area; make sure width and height are between 1 and 16384
+            //
+            int constexpr minSize = 1;
+            int constexpr maxSize = 16384;
+            auto windowRect = getClientRect().getUnion({ minSize, minSize }).getIntersection({ maxSize, maxSize });
+            if (bufferBounds == windowRect)
+            {
+                return;
+            }
+
+            bufferBounds = windowRect;
+
+            //
+            // Resize the swap chain buffer
+            //
+            if (swapChain != nullptr)
+            {
+                swapChainBuffer = nullptr; // must release swap chain buffer before calling ResizeBuffers
+
+                auto scaledBufferBounds = bufferBounds * dpiScalingFactor;
+                auto hr = swapChain->ResizeBuffers(0, scaledBufferBounds.getWidth(), scaledBufferBounds.getHeight(), DXGI_FORMAT_UNKNOWN, swapChainFlags);
+
+                if (SUCCEEDED(hr))
+                {
+                    createSwapChainBuffer();
+                }
+                else
+                {
+                    releaseDeviceContext();
+                }
+            }
+        }
+
+        Rectangle<int> getBufferBounds() const
+        {
+            return bufferBounds;
+        }
+
+        void addDeferredRepaint(Rectangle<int> deferredRepaint)
+        {
+            auto* const presentation = presentations + presentationIndex;
+            presentation->paintAreas.add(deferredRepaint);
+        }
+
+        void clearDeferredRepaints()
+        {
+            auto* const presentation = presentations + presentationIndex;
+            presentation->paintAreas.clear();
+        }
+
+        bool needsRepaint() const
+        {
+            auto* const presentation = presentations + presentationIndex;
+            return presentation->paintAreas.getNumRectangles() > 0;
+        }
+
+        bool isReadyToPaint() const
+        {
+            return presentations[presentationIndex ^ 1].state == direct2d::Presentation::clear;
+        }
+
+        void startRenderSync(Rectangle<int>& initialClipBounds)
+        {
+            clearDeferredRepaints();
+            paintedPresentation.store(nullptr);
+
+            createDeviceContext();
+            if (commandListDeviceContext != nullptr)
+            {
+                createSwapChainBuffer();
+                if (swapChainBuffer != nullptr)
+                {
+                    commandListDeviceContext->SetTarget(swapChainBuffer);
+                    commandListDeviceContext->BeginDraw();
+                }
+            }
+
+            initialClipBounds = getClientRect();
+        }
+
+        void finishRenderSync()
+        {
+            auto hr = commandListDeviceContext->EndDraw();
+            commandListDeviceContext->SetTarget(nullptr);
+
+            if (SUCCEEDED(hr))
+            {
+                swapChain->Present(presentSyncInterval, presentFlags);
+            }
+
+            ValidateRect(hwnd, nullptr);
+        }
+
+        bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
+        {
+            //
+            // Ready to paint? Return if the previous presentation has not been presented
+            //
+            if (!isReadyToPaint())
+            {
+                return false;
+            }
+
+            auto* const presentation = presentations + presentationIndex;
+
+            //
+            // Any areas to update?
+            //
+            updateRegion.refresh(hwnd);
+            if (updateRegion.getNumRECT() == 0 && presentation->paintAreas.getNumRectangles() == 0)
+            {
+                return false;
+            }
+
+            updateRegion.addToRectangleList(presentation->paintAreas);
+            ValidateRgn(hwnd, updateRegion.regionHandle);
+
+            initialClipBounds = presentation->paintAreas.getBounds();
+
+            //
+            // Start painting
+            //
+            presentation->frameNumber = frameNumber;
+            presentation->state = direct2d::Presentation::painting;
+
+#if 0 // JUCE_DEBUG
+            for (auto const area : presentation->paintAreas)
+            {
+                DBG("   area " << area.toString());
+            }
+
+            for (uint32 i = 0; i < updateRegion.getNumRECT(); ++i)
+            {
+                DBG("   update " << direct2d::RECTToRectangle<int>(updateRegion.getRECTArray()[i]).toString());
+            }
+#endif
+
+            createDeviceContext();
+            if (commandListDeviceContext != nullptr)
+            {
+                createSwapChainBuffer();
+                if (swapChainBuffer != nullptr)
+                {
+                    commandListDeviceContext->CreateCommandList(presentation->commandList.resetAndGetPointerAddress());
+                    commandListDeviceContext->SetTarget(presentation->commandList);
+                    commandListDeviceContext->BeginDraw();
+                }
+            }
+
+            return true;
+        }
+
+        void finishRenderAsync()
+        {
+            if (commandListDeviceContext != nullptr && swapChain != nullptr)
+            {
+                auto* const presentation = presentations + presentationIndex;
+
+                auto hr = commandListDeviceContext->EndDraw();
+                commandListDeviceContext->SetTarget(nullptr);
+                presentation->commandList->Close();
+                if (FAILED(hr))
+                {
+                    return;
+                }
+
+                auto paintBounds = presentation->paintAreas.getBounds();
+                if (!bufferBounds.intersects(paintBounds) || paintBounds.isEmpty())
+                {
+                    return;
+                }
+
+                presentation->state = direct2d::Presentation::painted;
+
+                {
+                    presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
+                    presentation->dirtyRectangles.clearQuick();
+
+                    for (auto paintArea : presentation->paintAreas)
+                    {
+                        paintArea = paintArea.getIntersection(bufferBounds);
+                        if (!paintArea.isEmpty())
+                        {
+                            presentation->dirtyRectangles.add(direct2d::rectangleToRECT(paintArea));
+                        }
+                    }
+
+                    presentation->bufferBounds = bufferBounds;
+                }
+
+                paintedPresentation.store(presentation);
+
+                presentationIndex ^= 1;
+                notify();
+
+                if (S_OK != hr && DXGI_STATUS_OCCLUDED != hr)
+                {
+                    releaseDeviceContext();
+                }
+            }
+        }
+
+        void setScaleFactor(double scale_)
+        {
+            dpiScalingFactor = scale_;
+
+            updateDeviceContextDPI();
+        }
+
+        double getScaleFactor() const
+        {
+            return dpiScalingFactor;
+        }
+
+        HWND hwnd = nullptr;
+        SharedResourcePointer<Direct2DFactories> sharedFactories;
+        ComSmartPtr<ID2D1Factory1> d2dDedicatedFactory;
+        ComSmartPtr<ID2D1StrokeStyle> strokeStyle;
+
+        direct2d::UpdateRegion updateRegion;
+        bool resizing = false;
+
+        class GlyphRunStorage
+        {
+        public:
+            HeapBlock<UINT16> glyphIndices;
+            HeapBlock<float> glyphAdvances;
+            HeapBlock<DWRITE_GLYPH_OFFSET> glyphOffsets;
+
+            void ensureSize(int minSize)
+            {
+                if (minSize > size)
+                {
+                    size = minSize;
+                    glyphIndices.realloc(size);
+                    glyphIndices.clear(size);
+                    glyphAdvances.realloc(size);
+                    glyphAdvances.clear(size);
+                    glyphOffsets.realloc(size);
+                    glyphOffsets.clear(size);
+                }
+            }
+
+        private:
+            int size = 0;
+        } glyphRunStorage;
     };
 
     //==============================================================================
