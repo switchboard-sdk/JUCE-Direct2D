@@ -253,6 +253,38 @@ namespace juce
             uint32 numRect = 0;
         };
 
+        struct Presentation
+        {
+            HRESULT status = S_OK;
+
+            ComSmartPtr<ID2D1CommandList> commandList;
+
+            RectangleList<int> paintAreas;
+            Rectangle<int> bufferBounds;
+            Array<RECT> dirtyRectangles;
+
+            enum State
+            {
+                clear,
+                painting,
+                painted
+            } state = clear;
+
+            int frameNumber = 0;
+#if JUCE_DIRECT2D_METRICS
+            double drawDurationSeconds;
+            double presentDurationSeconds;
+#endif
+
+            void reset()
+            {
+                state = clear;
+                paintAreas.clear();
+                dirtyRectangles.clearQuick();
+                commandList = nullptr;
+            }
+        };
+
     } // namespace Direct2D
 
 //==============================================================================
@@ -447,7 +479,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
 
     bool isReadyToPaint() const
     {
-        return presentations[presentationIndex ^ 1].state == Presentation::clear;
+        return presentations[presentationIndex ^ 1].state == direct2d::Presentation::clear;
     }
 
     void startRenderSync(Rectangle<int>& initialClipBounds)
@@ -511,7 +543,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         // Start painting
         //
         presentation->frameNumber = frameNumber;
-        presentation->state = Presentation::painting;
+        presentation->state = direct2d::Presentation::painting;
 
 #if 0 // JUCE_DEBUG
         for (auto const area : presentation->paintAreas)
@@ -560,7 +592,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
                 return;
             }
 
-            presentation->state = Presentation::painted;
+            presentation->state = direct2d::Presentation::painted;
 
             {
                 presentation->dirtyRectangles.ensureStorageAllocated(presentation->paintAreas.getNumRectangles());
@@ -653,41 +685,10 @@ private:
     ComSmartPtr<IDCompositionDevice> compositionDevice;
     ComSmartPtr<IDCompositionTarget> compositionTarget;
     ComSmartPtr<IDCompositionVisual> compositionVisual;
-
-    struct Presentation
-    {
-        HRESULT status = S_OK;
-
-        ComSmartPtr<ID2D1CommandList> commandList;
-        
-        RectangleList<int> paintAreas;
-        Rectangle<int> bufferBounds;
-        Array<RECT> dirtyRectangles;
-        
-        enum State
-        {
-            clear,
-            painting,
-            painted
-        } state = clear;
-
-        int frameNumber = 0;
-#if JUCE_DIRECT2D_METRICS
-        double drawDurationSeconds;
-        double presentDurationSeconds;
-#endif
-
-        void reset()
-        {
-            state = clear;
-            paintAreas.clear();
-            dirtyRectangles.clearQuick();
-            commandList = nullptr;
-        }
-
-    } presentations[2];
+    std::deque<Rectangle<int>> deferredRepaints;
+    direct2d::Presentation presentations[2];
     int presentationIndex = 0;
-    std::atomic<Presentation*> paintedPresentation = nullptr;
+    std::atomic<direct2d::Presentation*> paintedPresentation = nullptr;
 
     void run() override
     {
@@ -715,7 +716,7 @@ private:
                 continue;
             }
 
-            jassert(presentation->state == Presentation::painted);
+            jassert(presentation->state == direct2d::Presentation::painted);
 
             //
             // Render the command list
@@ -775,7 +776,7 @@ private:
 
     struct PresentDoneMessage : public CallbackMessage
     {
-        PresentDoneMessage(Pimpl* that_, Presentation* presentation_) :
+        PresentDoneMessage(Pimpl* that_, direct2d::Presentation* presentation_) :
             that(that_),
             presentation(presentation_)
         {
@@ -790,16 +791,16 @@ private:
             }
         }
 
-        static void createAndPost(Pimpl* that_, Presentation* presentation_)
+        static void createAndPost(Pimpl* that_, direct2d::Presentation* presentation_)
         {
             (new PresentDoneMessage{ that_, presentation_ })->post();
         }
 
         WeakReference<Pimpl> that;
-        Presentation* presentation;
+        direct2d::Presentation* presentation;
     };
 
-    void finishPresentation(Presentation* completedPresentation)
+    void finishPresentation(direct2d::Presentation* completedPresentation)
     {
         if (completedPresentation)
         {
