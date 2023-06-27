@@ -35,6 +35,83 @@ typedef HWND__* HWND;
 
 namespace direct2d
 {
+    struct PaintEvent
+    {
+        PaintEvent(int code_, char const* const name_) :
+            code(code_),
+            name(name_)
+        {
+        }
+
+        int code;
+        char const* const name;
+        int64 startTicks = Time::getHighResolutionTicks();
+        int64 finishTicks;
+        
+        double getDurationMsec() const
+        {
+            auto elapsed = finishTicks - startTicks;
+            return Time::highResolutionTicksToSeconds(elapsed) * 1000.0;
+        }
+        
+        enum
+        {
+            setOrigin,
+            addTransform,
+            clipToRectangle,
+            clipToRectangleList,
+            excludeClipRectangle,
+            clipToPath,
+            clipToImageAlpha,
+            saveState,
+            restoreState,
+            fillRect,
+            fillRectList,
+            drawRect,
+            beginTransparencyLayer,
+            setFill,
+            setOpacity,
+            setInterpolationQuality,
+            fillPath,
+            drawPath,
+            drawImage,
+            drawLine,
+            setFont,
+            drawGlyph,
+            drawTextLayout,
+            drawGlyphRun,
+            drawRoundedRectangle,
+            fillRoundedRectangle,
+            drawEllipse,
+            fillEllipse
+        };
+    };
+
+    struct Frame
+    {
+        int frameNumber;
+        int64 frameStartTicks = Time::getHighResolutionTicks();
+        int64 frameFinishTicks = 0;
+        RectangleList<int> rects;
+        Array<PaintEvent> events;
+
+        void addEvent(PaintEvent&& event)
+        {
+            events.add(event);
+        }
+
+        PaintEvent& getMostRecentEvent()
+        {
+            return events.getReference(events.size() - 1);
+        }
+
+        double getDurationMsec() const
+        {
+            auto elapsed = frameFinishTicks - frameStartTicks;
+            return Time::highResolutionTicksToSeconds(elapsed) * 1000.0;
+        }
+    };
+
     struct PaintStats : public ReferenceCountedObject
     {
         enum
@@ -45,6 +122,9 @@ namespace direct2d
             numStats
         };
 
+        static constexpr int maxEvents = 65536;
+        static constexpr int maxFrames = 1024;
+
         StatisticsAccumulator<double> accumulators[numStats];
         int64 const creationTime = Time::getMillisecondCounter();
         double const millisecondsPerTick = 1000.0 / (double)Time::getHighResolutionTicksPerSecond();
@@ -52,6 +132,49 @@ namespace direct2d
         int presentCount = 0;
         int64 lastPaintStartTicks = 0;
         uint64 lockAcquireMaxTicks = 0;
+
+        std::deque<Frame> frames;
+
+        void startFrame(int frameNumber)
+        {
+            while (frames.size() > maxFrames)
+            {
+                frames.pop_back();
+            }
+
+            frames.push_front(Frame{ frameNumber });
+        }
+
+        void finishFrame()
+        {
+            getMostRecentFrame().frameFinishTicks = Time::getHighResolutionTicks();
+        }
+
+        Frame& getMostRecentFrame()
+        {
+            jassert(frames.size() > 0);
+            return frames.front();
+        }
+
+        PaintStats()
+        {
+        }
+
+        ~PaintStats()
+        {
+#if 0
+            for (auto frame : frames)
+            {
+                DBG("\nFrame #" << frame.frameNumber << " " << (frame.finishTicks - frame.startTicks) * millisecondsPerTick << " ms");
+                for (int i = frame.firstEventIndex; i < frame.firstEventIndex + frame.numEvents; ++i)
+                {
+                    auto& event = events.getReference(i);
+                    auto duration = (event.finishTicks - event.startTicks) * millisecondsPerTick;
+                    DBG("  " << event.name << " " << duration << " ms");
+                }
+            }
+#endif
+        }
 
         void reset()
         {
@@ -66,8 +189,22 @@ namespace direct2d
         }
 
         using Ptr = ReferenceCountedObjectPtr<PaintStats>;
+    };
 
-        static constexpr char propertyName[] = "Direct2DPaintStats";
+    struct ScopedPaintEvent
+    {
+        ScopedPaintEvent(PaintStats::Ptr stats_, int code_, char const * const name_) :
+            stats(stats_)
+        {
+            stats->getMostRecentFrame().addEvent(PaintEvent{ code_, name_ });
+        }
+
+        ~ScopedPaintEvent()
+        {
+            stats->getMostRecentFrame().getMostRecentEvent().finishTicks = Time::getHighResolutionTicks();
+        }
+
+        PaintStats::Ptr stats;
     };
 
     struct ScopedElapsedTime
@@ -89,6 +226,17 @@ namespace direct2d
         int accumulatorIndex;
     };
 }
+
+#define D2D_START_FRAME if (stats->frames.size() < stats->maxFrames) stats->startFrame(frameNumber);
+#define D2D_FINISH_FRAME if (stats->frames.size() < stats->maxFrames) stats->finishFrame();
+#define D2D_SCOPED_PAINT_EVENT(code, name) direct2d::ScopedPaintEvent scopedEvent(stats, direct2d::PaintEvent:: code, name);
+//#define D2D_SCOPED_PAINT_EVENT(code, name) stats->getMostRecentFrame().numEvents++;
+
+#else
+    
+#define D2D_START_FRAME
+#define D2D_FINISH_FRAME
+#define D2D_SCOPED_PAINT_EVENT(code, name)
 
 #endif
 

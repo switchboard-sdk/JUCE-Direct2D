@@ -482,7 +482,7 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         ValidateRect(hwnd, nullptr);
     }
 
-    bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
+    bool startRenderAsync(int frameNumber, RectangleList<int>& clipAreas)
     {
         //
         // Ready to paint? Return if the previous presentation has not been presented
@@ -505,7 +505,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         updateRegion.addToRectangleList(presentation->paintAreas);
         ValidateRgn(hwnd, updateRegion.regionHandle);
 
-        initialClipBounds = presentation->paintAreas.getBounds();
+        stats->getMostRecentFrame().rects = presentation->paintAreas;
+
+        clipAreas = presentation->paintAreas;
 
         //
         // Start painting
@@ -513,7 +515,8 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
         presentation->frameNumber = frameNumber;
         presentation->state = Presentation::painting;
 
-#if 0 // JUCE_DEBUG
+#if 1 // JUCE_DEBUG
+        DBG("\nstart async");
         for (auto const area : presentation->paintAreas)
         {
             DBG("   area " << area.toString());
@@ -579,6 +582,9 @@ struct Direct2DLowLevelGraphicsContext::Pimpl : public Thread
             }
 
             paintedPresentation.store(presentation);
+
+            D2D_FINISH_FRAME
+
             presentationIndex ^= 1;
             notify();
 
@@ -1321,7 +1327,7 @@ void Direct2DLowLevelGraphicsContext::finishResizing()
 
 void Direct2DLowLevelGraphicsContext::addDeferredRepaint(Rectangle<int> deferredRepaint)
 {
-    //DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
+    DBG("  ----addDeferredRepaint " << deferredRepaint.toString());
     pimpl->addDeferredRepaint(deferredRepaint);
 
     triggerAsyncUpdate();
@@ -1339,15 +1345,21 @@ bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
         return false;
     }
 
-    Rectangle<int> initialClipBounds;
-    if (pimpl->startRenderAsync(frameNumber, initialClipBounds))
+    D2D_START_FRAME
+
+        //Rectangle<int> initialClipBounds;
+        RectangleList<int> clipAreas;
+
+    if (pimpl->startRenderAsync(frameNumber, clipAreas))
     {
         saveState();
 
-        if (initialClipBounds.isEmpty() == false)
+        if (clipAreas.getBounds().isEmpty() == false)
         {
-            clipToRectangle(initialClipBounds);
+            clipToRectangleList(clipAreas);
         }
+
+        DBG("initial clip area " << clipAreas.getBounds().toString());
 
         return true;
     }
@@ -1366,12 +1378,17 @@ void Direct2DLowLevelGraphicsContext::endAsync()
     pimpl->finishRenderAsync();
 
     pimpl->updateRegion.clear();
+
+    D2D_FINISH_FRAME
 }
 
 void Direct2DLowLevelGraphicsContext::startSync()
 {
     Rectangle<int> initialClipBounds;
 
+    int frameNumber = -1;
+    D2D_START_FRAME
+        
     pimpl->startRenderSync(initialClipBounds);
     saveState();
 
@@ -1392,15 +1409,21 @@ void Direct2DLowLevelGraphicsContext::endSync()
     pimpl->finishRenderSync();
 
     pimpl->updateRegion.clear();
+
+    D2D_FINISH_FRAME
 }
 
 void Direct2DLowLevelGraphicsContext::setOrigin (Point<int> o)
 {
+    D2D_SCOPED_PAINT_EVENT(setOrigin, "setOrigin")
+
     currentState->currentTransform.setOrigin(o);
 }
 
 void Direct2DLowLevelGraphicsContext::addTransform (const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(addTransform, "addTransform")
+
     currentState->currentTransform.addTransform(transform);
 }
 
@@ -1411,6 +1434,8 @@ float Direct2DLowLevelGraphicsContext::getPhysicalPixelScaleFactor()
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 {
+    D2D_SCOPED_PAINT_EVENT(clipToRectangle, "clipToRectangle")
+
     //
     // Update the current clip region (only used for getClipBounds)
     //
@@ -1441,6 +1466,8 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangle (const Rectangle<int>& r)
 
 bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<int>& clipRegion)
 {
+    D2D_SCOPED_PAINT_EVENT(clipToRectangleList, "clipToRectangleList")
+
     //
     // Update the current clip region (only used for getClipBounds)
     //
@@ -1455,6 +1482,8 @@ bool Direct2DLowLevelGraphicsContext::clipToRectangleList (const RectangleList<i
 
 void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>& r)
 {
+    D2D_SCOPED_PAINT_EVENT(excludeClipRectangle, "excludeClipRectangle")
+
     //
     // To exclude the rectangle r, build a rectangle list with r as the first rectangle and the render target bounds as the second.
     // 
@@ -1474,11 +1503,15 @@ void Direct2DLowLevelGraphicsContext::excludeClipRectangle (const Rectangle<int>
 
 void Direct2DLowLevelGraphicsContext::clipToPath (const Path& path, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(clipToPath, "clipToPath")
+
     currentState->pushGeometryClipLayer(pimpl->pathToPathGeometry(path, currentState->currentTransform.getTransformWith(transform)));
 }
 
 void Direct2DLowLevelGraphicsContext::clipToImageAlpha (const Image& sourceImage, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(clipToImageAlpha, "clipToImageAlpha")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         auto chainedTransform = currentState->currentTransform.getTransformWith(transform);
@@ -1525,12 +1558,16 @@ bool Direct2DLowLevelGraphicsContext::isClipEmpty() const
 
 void Direct2DLowLevelGraphicsContext::saveState()
 {
+    D2D_SCOPED_PAINT_EVENT(saveState, "saveState")
+
     states.add (new SavedState (*this));
     currentState = states.getLast();
 }
 
 void Direct2DLowLevelGraphicsContext::restoreState()
 {
+    D2D_SCOPED_PAINT_EVENT(restoreState, "restoreState")
+
     jassert (states.size() > 1); //you should never pop the last state!
     states.removeLast (1);
     currentState = states.getLast();
@@ -1543,6 +1580,8 @@ void Direct2DLowLevelGraphicsContext::restoreState()
 
 void Direct2DLowLevelGraphicsContext::beginTransparencyLayer(float opacity)
 {
+    D2D_SCOPED_PAINT_EVENT(beginTransparencyLayer, "beginTransparencyLayer")
+
     currentState->beginTransparency(opacity);
 }
 
@@ -1555,16 +1594,22 @@ void Direct2DLowLevelGraphicsContext::endTransparencyLayer()
 
 void Direct2DLowLevelGraphicsContext::setFill (const FillType& fillType)
 {
+    D2D_SCOPED_PAINT_EVENT(setFill, "setFill")
+
     currentState->setFill (fillType);
 }
 
 void Direct2DLowLevelGraphicsContext::setOpacity (float newOpacity)
 {
+    D2D_SCOPED_PAINT_EVENT(setOpacity, "setOpacity")
+
     currentState->setOpacity (newOpacity);
 }
 
 void Direct2DLowLevelGraphicsContext::setInterpolationQuality (Graphics::ResamplingQuality quality)
 {
+    D2D_SCOPED_PAINT_EVENT(setInterpolationQuality, "setInterpolationQuality")
+
     switch (quality)
     {
     case Graphics::ResamplingQuality::lowResamplingQuality:
@@ -1588,6 +1633,8 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<int>& r, bool /*
 
 void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 {
+    D2D_SCOPED_PAINT_EVENT(fillRect, "fillRect")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1599,12 +1646,16 @@ void Direct2DLowLevelGraphicsContext::fillRect (const Rectangle<float>& r)
 
 void Direct2DLowLevelGraphicsContext::fillRectList (const RectangleList<float>& list)
 {
+    D2D_SCOPED_PAINT_EVENT(fillRectList, "fillRectList")
+
     for (auto& r : list)
         fillRect (r);
 }
 
 bool Direct2DLowLevelGraphicsContext::drawRect(const Rectangle<float>& r, float lineThickness)
 {
+    D2D_SCOPED_PAINT_EVENT(drawRect, "excludeClipRectangle")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1620,6 +1671,8 @@ bool Direct2DLowLevelGraphicsContext::drawRect(const Rectangle<float>& r, float 
 
 void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(fillPath, "fillPath")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1634,6 +1687,8 @@ void Direct2DLowLevelGraphicsContext::fillPath (const Path& p, const AffineTrans
 
 bool Direct2DLowLevelGraphicsContext::drawPath(const Path& p, const PathStrokeType& strokeType, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(drawPath, "drawPath")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1718,6 +1773,8 @@ bool Direct2DLowLevelGraphicsContext::drawPath(const Path& p, const PathStrokeTy
 
 void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(drawImage, "drawImage")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransformWith(transform)));
@@ -1745,6 +1802,8 @@ void Direct2DLowLevelGraphicsContext::drawImage (const Image& image, const Affin
 
 void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 {
+    D2D_SCOPED_PAINT_EVENT(drawLine, "drawLine")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
@@ -1759,6 +1818,8 @@ void Direct2DLowLevelGraphicsContext::drawLine (const Line<float>& line)
 
 void Direct2DLowLevelGraphicsContext::setFont (const Font& newFont)
 {
+    D2D_SCOPED_PAINT_EVENT(setFont, "setFont")
+
     currentState->setFont (newFont);
 }
 
@@ -1769,6 +1830,8 @@ const Font& Direct2DLowLevelGraphicsContext::getFont()
 
 void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(drawGlyph, "drawGlyph")
+
     currentState->createBrush();
     currentState->createFont();
 
@@ -1812,6 +1875,8 @@ void Direct2DLowLevelGraphicsContext::drawGlyph (int glyphNumber, const AffineTr
 
 bool Direct2DLowLevelGraphicsContext::drawTextLayout (const AttributedString& text, const Rectangle<float>& area)
 {
+    D2D_SCOPED_PAINT_EVENT(drawTextLayout, "drawTextLayout")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
@@ -1839,6 +1904,8 @@ double Direct2DLowLevelGraphicsContext::getScaleFactor() const
 
 bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area, float cornerSize, float lineThickness)
 {
+    D2D_SCOPED_PAINT_EVENT(drawRoundedRectangle, "drawRoundedRectangle")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1860,6 +1927,8 @@ bool Direct2DLowLevelGraphicsContext::drawRoundedRectangle(Rectangle<float> area
 
 bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area, float cornerSize)
 {
+    D2D_SCOPED_PAINT_EVENT(fillRoundedRectangle, "fillRoundedRectangle")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1881,6 +1950,8 @@ bool Direct2DLowLevelGraphicsContext::fillRoundedRectangle(Rectangle<float> area
 
 bool Direct2DLowLevelGraphicsContext::drawEllipse(Rectangle<float> area, float lineThickness)
 {
+    D2D_SCOPED_PAINT_EVENT(drawEllipse, "drawEllipse")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1902,6 +1973,8 @@ bool Direct2DLowLevelGraphicsContext::drawEllipse(Rectangle<float> area, float l
 
 bool Direct2DLowLevelGraphicsContext::fillEllipse(Rectangle<float> area)
 {
+    D2D_SCOPED_PAINT_EVENT(fillEllipse, "fillEllipse")
+
     if (auto deviceContext = pimpl->getDeviceContext())
     {
         currentState->createBrush();
@@ -1938,6 +2011,8 @@ void printTransform(StringRef name, AffineTransform const& transform)
 
 void Direct2DLowLevelGraphicsContext::drawGlyphRun(Array<Glyph> const& glyphRun, const AffineTransform& transform)
 {
+    D2D_SCOPED_PAINT_EVENT(drawGlyphRun, "drawGlyphRun")
+
     currentState->createBrush();
     currentState->createFont();
 
