@@ -1051,6 +1051,8 @@ namespace juce
                 // 
                 // Pass nullptr for the layer to allow Direct2D to manage the layers (Windows 8 or later)
                 //
+                deviceContext->SetTransform(D2D1::IdentityMatrix());
+
                 deviceContext->PushLayer(layerParameters, nullptr);
 
                 pushedLayers.add(new Layer{ deviceContext });
@@ -1069,6 +1071,7 @@ namespace juce
         {
             if (auto deviceContext = owner.pimpl->getDeviceContext())
             {
+                deviceContext->SetTransform(D2D1::IdentityMatrix());
                 deviceContext->PushAxisAlignedClip(direct2d::rectangleToRectF(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
                 pushedLayers.add(new AxisAlignedClipLayer{ deviceContext });
@@ -1300,6 +1303,35 @@ namespace juce
         FillType fillType;
 
         D2D1_INTERPOLATION_MODE interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+
+        //
+        // Bitmap & gradient brushes are position-dependent and are therefore affected by transforms
+        //
+        // Drawing text affects the world transform, so those brushes need an inverse transform to undo the world transform
+        //
+        struct ScopedBrushTransformInverter
+        {
+            ScopedBrushTransformInverter(SavedState const* const state_, AffineTransform const& transformToInvert_) :
+                state(state_)
+            {
+                if (state_->currentBrush && state_->currentBrush != state_->owner.pimpl->getColourBrush())
+                {
+                    state_->currentBrush->SetTransform(direct2d::transformToMatrix(transformToInvert_.inverted()));
+                    resetTransform = true;
+                }
+            }
+
+            ~ScopedBrushTransformInverter()
+            {
+                if (resetTransform)
+                {
+                    state->currentBrush->SetTransform(D2D1::IdentityMatrix());
+                }
+            }
+            
+            SavedState const* const state;
+            bool resetTransform = false;
+        };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SavedState)
     };
@@ -1613,7 +1645,6 @@ namespace juce
             currentState->createBrush();
             deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
             deviceContext->FillRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
     }
 
@@ -1630,7 +1661,6 @@ namespace juce
             currentState->createBrush();
             deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
             deviceContext->DrawRectangle(direct2d::rectangleToRectF(r), currentState->currentBrush, lineThickness);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
 
             return true;
         }
@@ -1647,7 +1677,6 @@ namespace juce
             {
                 deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
                 deviceContext->FillGeometry(geometry, currentState->currentBrush);
-                deviceContext->SetTransform(D2D1::IdentityMatrix());
             }
         }
     }
@@ -1727,7 +1756,6 @@ namespace juce
 
                 deviceContext->SetTransform(direct2d::transformToMatrix(currentState->currentTransform.getTransform()));
                 deviceContext->DrawGeometry(geometry, currentState->currentBrush, strokeType.getStrokeThickness(), pimpl->strokeStyle);
-                deviceContext->SetTransform(D2D1::IdentityMatrix());
 
                 return true;
             }
@@ -1759,7 +1787,7 @@ namespace juce
                 }
             }
 
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
+            
         }
     }
 
@@ -1773,7 +1801,6 @@ namespace juce
             deviceContext->DrawLine(D2D1::Point2F(line.getStartX(), line.getStartY()),
                 D2D1::Point2F(line.getEndX(), line.getEndY()),
                 currentState->currentBrush);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
     }
 
@@ -1819,14 +1846,9 @@ namespace juce
             //
             // The gradient brushes are position-dependent, so need to undo the device context transform
             //
-            D2D1::Matrix3x2F brushTransform;
-            currentState->currentBrush->GetTransform(&brushTransform);
-            currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
+            SavedState::ScopedBrushTransformInverter brushTransformInverter{ currentState, scaledTransform };
 
             deviceContext->DrawGlyphRun({}, &glyphRun, currentState->currentBrush);
-
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
-            currentState->currentBrush->SetTransform(brushTransform);
         }
     }
 
@@ -1840,8 +1862,6 @@ namespace juce
                 *(deviceContext),
                 *(pimpl->sharedFactories->directWriteFactory),
                 *(pimpl->sharedFactories->systemFonts));
-
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
         }
 
         return true;
@@ -1870,7 +1890,6 @@ namespace juce
                 cornerSize, cornerSize
             };
             deviceContext->DrawRoundedRectangle(roundedRect, currentState->currentBrush, lineThickness);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
 
             return true;
         }
@@ -1891,8 +1910,7 @@ namespace juce
                 cornerSize, cornerSize
             };
             deviceContext->FillRoundedRectangle(roundedRect, currentState->currentBrush);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
-
+            
             return true;
         }
 
@@ -1912,7 +1930,6 @@ namespace juce
                 area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
             };
             deviceContext->DrawEllipse(ellipse, currentState->currentBrush, lineThickness, nullptr);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
 
             return true;
         }
@@ -1933,8 +1950,7 @@ namespace juce
                 area.proportionOfWidth(0.5f), area.proportionOfHeight(0.5f)
             };
             deviceContext->FillEllipse(ellipse, currentState->currentBrush);
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
-
+            
             return true;
         }
 
@@ -2010,14 +2026,9 @@ namespace juce
             //
             // The gradient brushes are position-dependent, so need to undo the device context transform
             //
-            D2D1::Matrix3x2F brushTransform;
-            currentState->currentBrush->GetTransform(&brushTransform);
-            currentState->currentBrush->SetTransform(direct2d::transformToMatrix(scaledTransform.inverted()));
+            SavedState::ScopedBrushTransformInverter brushTransformInverter{ currentState, scaledTransform };
 
             deviceContext->DrawGlyphRun({}, &directWriteGlyphRun, currentState->currentBrush);
-
-            deviceContext->SetTransform(D2D1::IdentityMatrix());
-            currentState->currentBrush->SetTransform(brushTransform);
         }
     }
 
