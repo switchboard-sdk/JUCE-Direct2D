@@ -1187,7 +1187,7 @@ namespace juce
 
                     image = image.convertedToFormat(Image::ARGB);
                     Image::BitmapData bd(image, Image::BitmapData::readOnly);
-                    bp.pixelFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+                    bp.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
                     bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
                     ComSmartPtr<ID2D1Bitmap> tiledImageBitmap;
@@ -1536,7 +1536,7 @@ namespace juce
             auto bp = D2D1::BitmapProperties();
 
             Image::BitmapData bd{ maskImage, Image::BitmapData::readOnly };
-            bp.pixelFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+            bp.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
             bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
             auto hr = deviceContext->CreateBitmap(D2D1_SIZE_U{ (UINT32)maskImage.getWidth(), (UINT32)maskImage.getHeight() }, bd.data, bd.lineStride, bp, bitmap.resetAndGetPointerAddress());
@@ -1768,7 +1768,7 @@ namespace juce
 
             Image img(image.convertedToFormat(Image::ARGB));
             Image::BitmapData bd(img, Image::BitmapData::readOnly);
-            bp.pixelFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+            bp.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
             bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
 
             {
