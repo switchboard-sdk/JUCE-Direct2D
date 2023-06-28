@@ -159,7 +159,7 @@ namespace juce
 
             if (figureStarted)
             {
-                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
             }
         }
 
