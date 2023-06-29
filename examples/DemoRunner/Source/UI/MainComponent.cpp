@@ -375,7 +375,7 @@ void MainComponent::resized()
         contentComponent->setTabBarIndent (150);
     }
 
-    contentComponent->setBounds (safeBounds);
+    contentComponent->setBounds(safeBounds);
 }
 
 void MainComponent::homeButtonClicked()
@@ -438,6 +438,17 @@ void MainComponent::parentHierarchyChanged()
         }
 
         updateRenderingEngine (currentRenderingEngineIdx);
+
+#if JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
+        if (peer)
+        {
+            statsComponent = std::make_unique<StatsComponent>(peer);
+        }
+        else
+        {
+            statsComponent = nullptr;
+        }
+#endif
     }
 }
 

@@ -70,5 +70,94 @@ private:
     bool isShowingHeavyweightDemo = false;
     int sidePanelWidth = 0;
 
+#if JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
+    struct StatsComponent : public Component, public ComponentListener, public Timer
+    {
+        StatsComponent(ComponentPeer* const peer_) :
+            owner(&peer_->getComponent()),
+            ownerStats(peer_->paintStats)
+        {
+            setOpaque(false);
+            setVisible(true);
+            addToDesktop(0);
+            setAlwaysOnTop(true);
+            setInterceptsMouseClicks(false, true);
+
+            componentMovedOrResized(*owner, true, true);
+            owner->addComponentListener(this);
+
+            resetButton.onClick = [this]
+            {
+                ownerStats->reset();
+            };
+            addAndMakeVisible(resetButton);
+
+            startTimer(1000);
+        }
+
+        ~StatsComponent() override
+        {
+            if (owner)
+            {
+                owner->removeComponentListener(this);
+            }
+        }
+
+        void resized() override
+        {
+            int w = 60;
+            int h = 22;
+            resetButton.setBounds(getWidth() - w - 20, (getHeight() - h) / 2, w, h);
+        }
+
+        void paint(Graphics& g) override
+        {
+            if (!owner || !ownerStats)
+            {
+                return;
+            }
+
+            juce::Rectangle<float> r = getLocalBounds().removeFromBottom(25).toFloat().withX(20.0f).withWidth(getWidth() * 0.25f);
+            {
+                g.setColour(juce::Colours::white);
+                juce::String line{ "Paint duration (ms) " };
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::paintDuration].getAverage(), 1 } << " avg. / ";
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::paintDuration].getMaxValue(), 1 } << " max / #" << ownerStats->paintCount;
+                g.drawText(line, r, juce::Justification::centredLeft);
+            }
+            {
+                r.translate(r.getWidth(), 0.0f);
+                juce::String line{ "Thread paint duration (ms) " };
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::threadPaintDuration].getAverage(), 1 } << " avg. / ";
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::threadPaintDuration].getMaxValue(), 1 };
+                g.drawText(line, r, juce::Justification::centredLeft);
+            }
+            {
+                r.translate(r.getWidth(), 0.0f);
+                juce::String line{ "Present (ms) " };
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::presentDuration].getAverage(), 1 } << " avg. / ";
+                line << juce::String{ ownerStats->accumulators[direct2d::PaintStats::presentDuration].getMaxValue(), 1 } << " max / #" << ownerStats->presentCount;
+                g.drawText(line, r, juce::Justification::centredLeft);
+            }
+        }
+
+        Component::SafePointer<Component> owner;
+        direct2d::PaintStats::Ptr ownerStats;
+
+        void componentMovedOrResized(Component& component, bool /*wasMoved*/, bool /*wasResized*/) override
+        {
+            setBounds(component.getScreenBounds().removeFromTop(30).removeFromRight(component.proportionOfWidth(0.75f)));
+        }
+
+        void timerCallback() override
+        {
+            repaint();
+        }
+
+        TextButton resetButton{ "Reset" };
+    };
+    std::unique_ptr<StatsComponent> statsComponent;
+#endif
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
