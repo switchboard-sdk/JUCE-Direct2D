@@ -652,6 +652,12 @@ namespace juce
             auto hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, reinterpret_cast<void**>(d2dDedicatedFactory.resetAndGetPointerAddress()));
             jassertquiet(SUCCEEDED(hr));
 
+            createDeviceContext();
+            if (commandListDeviceContext != nullptr)
+            {
+                createSwapChainBuffer();
+            }
+
             startThread(Priority::highest);
         }
 
