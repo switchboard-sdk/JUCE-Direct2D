@@ -543,7 +543,7 @@ public:
     Style getAppStyle() const { return style; }
 
 #if JUCE_DIRECT2D_METRICS
-    direct2d::PaintStats::Ptr stats = new direct2d::PaintStats{};
+    direct2d::PaintStats::Ptr paintStats = new direct2d::PaintStats{};
 #endif
 
 protected:

@@ -152,7 +152,7 @@ public:
     bool needsRepaint();
     void startSync();
     void endSync();
-    bool startAsync(int frameNumber);
+    bool startAsync();
     void endAsync();
 
     void setScaleFactor(double scale_);

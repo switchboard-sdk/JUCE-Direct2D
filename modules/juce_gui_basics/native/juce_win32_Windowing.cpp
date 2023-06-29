@@ -2441,7 +2441,6 @@ private:
     RenderingEngineType currentRenderingEngine;
    #if JUCE_DIRECT2D
     std::unique_ptr<Direct2DLowLevelGraphicsContext> direct2DContext;
-    int frameNumber = 0;
    #endif
     uint32 lastPaintTime = 0;
     ULONGLONG lastMagnifySize = 0;
@@ -2870,7 +2869,8 @@ private:
     void handlePaintMessage()
     {
 #if JUCE_DIRECT2D_METRICS
-        direct2d::ScopedElapsedTime elapsedTime{ stats, stats->paintDuration };
+        direct2d::ScopedElapsedTime elapsedTime{ paintStats, paintStats->paintDuration };
+        paintStats->paintCount++;
 #endif
 
 #if JUCE_DIRECT2D
@@ -2911,23 +2911,6 @@ private:
 
             lastPaintTime = Time::getMillisecondCounter();
         }
-
-#if 0 // JUCE_DIRECT2D && JUCE_DIRECT2D_METRICS
-        auto finishPaintTicks = juce::Time::getHighResolutionTicks();
-
-        if (stats.lastPaintStartTicks != 0)
-        {
-            stats.accumulators[PaintStats::paintDuration].addValue(Time::highResolutionTicksToSeconds(finishPaintTicks - startPaintTicks));
-            stats.accumulators[PaintStats::paintInterval].addValue(Time::highResolutionTicksToSeconds(startPaintTicks - stats.lastPaintStartTicks));
-        }
-        stats.lastPaintStartTicks = startPaintTicks;
-
-        frameTime.frameNumber = frameNumber;
-        frameTime.paintStartTicks = startPaintTicks;
-        frameTime.paintFinishTicks = finishPaintTicks;
-        frameHistory.push(frameTime);
-        ++frameNumber;
-#endif
     }
 
 
@@ -2939,11 +2922,10 @@ private:
         //
         // startAsync returns true if there are any areas to be painted
         //
-        if (direct2DContext->startAsync(frameNumber))
+        if (direct2DContext->startAsync())
         {
             handlePaint(*direct2DContext);
             direct2DContext->endAsync();
-            frameNumber++;
         }
     }
 
@@ -3087,6 +3069,10 @@ private:
    #if JUCE_DIRECT2D
     void updateDirect2DContext()
     {
+#if JUCE_DIRECT2D_METRICS
+        paintStats->reset();
+#endif
+
         auto exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
         if (currentRenderingEngine != direct2DRenderingEngine)
@@ -3098,7 +3084,7 @@ private:
         else if (direct2DContext == nullptr)
         {
 #if JUCE_DIRECT2D_METRICS
-            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, stats);
+            direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd, paintStats);
 #else
             direct2DContext = std::make_unique<Direct2DLowLevelGraphicsContext>(hwnd);
 #endif

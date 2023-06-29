@@ -330,6 +330,7 @@ namespace juce
         ComSmartPtr<IDCompositionDevice> compositionDevice;
         ComSmartPtr<IDCompositionTarget> compositionTarget;
         ComSmartPtr<IDCompositionVisual> compositionVisual;
+        int frameNumber = 0;
         direct2d::Presentation presentations[2];
         int presentationIndex = 0;
         std::atomic<direct2d::Presentation*> paintedPresentation = nullptr;
@@ -407,6 +408,10 @@ namespace juce
 
                     presentation->status = swapChain->Present1(presentSyncInterval, presentFlags, &presentParameters);
                     jassert(SUCCEEDED(presentation->status));
+
+#if JUCE_DIRECT2D_METRICS
+                    stats->presentCount++;
+#endif
 
                     fullPresentDone = SUCCEEDED(presentation->status);
                 }
@@ -631,7 +636,6 @@ namespace juce
         Pimpl(Direct2DLowLevelGraphicsContext& owner_, HWND hwnd_, bool tearingSupported_) :
 #endif
             Thread("Direct2DLowLevelGraphicsContext"),
-            hwnd(hwnd_),
             owner(owner_),
 #if JUCE_DIRECT2D_METRICS
             stats(stats_),
@@ -641,7 +645,8 @@ namespace juce
             dxgiScaling(DXGI_SCALING_STRETCH),
             swapChainFlags(tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0),
             presentSyncInterval(tearingSupported_ ? 0 : 1),
-            presentFlags(tearingSupported_ ? DXGI_PRESENT_ALLOW_TEARING : 0)
+            presentFlags(tearingSupported_ ? DXGI_PRESENT_ALLOW_TEARING : 0),
+            hwnd(hwnd_)
         {
 #if JUCE_DEBUG
             D2D1_FACTORY_OPTIONS options{ D2D1_DEBUG_LEVEL_INFORMATION };
@@ -854,7 +859,7 @@ namespace juce
             ValidateRect(hwnd, nullptr);
         }
 
-        bool startRenderAsync(int frameNumber, Rectangle<int>& initialClipBounds)
+        bool startRenderAsync(Rectangle<int>& initialClipBounds)
         {
             //
             // Ready to paint? Return if the previous presentation has not been presented
@@ -960,6 +965,8 @@ namespace juce
                 {
                     releaseDeviceContext();
                 }
+
+                frameNumber++;
             }
         }
 
@@ -1345,9 +1352,9 @@ namespace juce
     //==============================================================================
 #if JUCE_DIRECT2D_METRICS
     Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_, direct2d::PaintStats::Ptr stats_)
-        : currentState(nullptr),
-        pimpl(new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), stats_)),
-        stats(stats_)
+        : stats(stats_),
+        currentState(nullptr),
+        pimpl(new Pimpl(*this, hwnd_, direct2d::isTearingSupported(), stats_))
 #else
     Direct2DLowLevelGraphicsContext::Direct2DLowLevelGraphicsContext(HWND hwnd_)
         : currentState(nullptr),
@@ -1390,7 +1397,7 @@ namespace juce
         return pimpl->needsRepaint();
     }
 
-    bool Direct2DLowLevelGraphicsContext::startAsync(int frameNumber)
+    bool Direct2DLowLevelGraphicsContext::startAsync()
     {
         if (pimpl->resizing)
         {
@@ -1398,7 +1405,7 @@ namespace juce
         }
 
         Rectangle<int> initialClipBounds;
-        if (pimpl->startRenderAsync(frameNumber, initialClipBounds))
+        if (pimpl->startRenderAsync(initialClipBounds))
         {
             saveState();
 
